@@ -6,6 +6,7 @@ All public REST endpoints are versioned under `/api/v1`.
 
 - `GET /api/v1/overview`
 - `GET /api/v1/hardware/targets`
+- `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
 - `GET /api/v1/events`
@@ -74,6 +75,36 @@ Build `0.1.0` treats S19j Pro on Xilinx, BeagleBone Black, and Amlogic as
 MVP-stable. Other S19-class Xilinx, BeagleBone Black, and Amlogic targets are
 listed as experimental until hardware validation is complete. CVitek is listed
 for operator identification but is not supported in build `0.1.0`.
+
+Hardware probe report:
+
+```json
+{
+  "schema_version": 1,
+  "backend": "hardware-probe",
+  "safe_read_only": true,
+  "summary": {
+    "total": 4,
+    "detected": 0,
+    "missing_required": 3,
+    "skipped": 0
+  },
+  "checks": [
+    {
+      "name": "control UART",
+      "interface": "uart",
+      "path": "/dev/ttyPS0",
+      "required": true,
+      "status": "missing",
+      "detail": "expected path is not present on this host"
+    }
+  ],
+  "notes": []
+}
+```
+
+The probe endpoint is read-only. It checks expected OS paths only and does not
+issue GPIO, UART, I2C, SPI, fan, voltage, clock, pool, or ASIC commands.
 
 Events response:
 

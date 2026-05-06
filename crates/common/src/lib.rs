@@ -5,6 +5,7 @@ pub mod event;
 pub mod manifest;
 pub mod overview;
 pub mod pool;
+pub mod probe;
 pub mod status;
 pub mod support;
 pub mod tuning;
@@ -29,6 +30,7 @@ pub use overview::DashboardOverview;
 pub use pool::{
     PoolConfig, PoolConfigError, PoolInfo, PoolSummary, summarize_pools, validate_pools,
 };
+pub use probe::{HardwareProbeReport, HardwareProbeSummary, ProbeCheck, ProbeStatus};
 pub use status::{
     ChainStatus, HealthStatus, HealthStatusResponse, MinerMode, MinerStatus, RuntimeBackendMode,
     RuntimeBackendModeParseError, Severity, SystemInfo,

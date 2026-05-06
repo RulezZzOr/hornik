@@ -2,9 +2,9 @@ use openmineros_asic_backend::{BackendError, BackendHandle};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
-    EventsResponse, HealthStatus, MinerStatus, Model, PoolConfig, PoolSummary, ProfilesResponse,
-    RuntimeBackendMode, RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo,
-    TuningConfig, UpdateStatus, summarize_pools,
+    EventsResponse, HardwareProbeReport, HealthStatus, MinerStatus, Model, PoolConfig, PoolSummary,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, SupportBundle,
+    SupportBundlePrivacy, SystemInfo, TuningConfig, UpdateStatus, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -102,6 +102,10 @@ impl Supervisor {
 
     pub fn chains(&self) -> Vec<ChainStatus> {
         self.backend.chain_statuses()
+    }
+
+    pub fn hardware_probe_report(&self) -> HardwareProbeReport {
+        self.backend.probe_report()
     }
 
     pub fn contribution_status(&self) -> ContributionStatus {
@@ -626,6 +630,29 @@ mod tests {
                 .events
                 .iter()
                 .any(|event| event.event_type == "backend.hardware_probe_scaffold")
+        );
+    }
+
+    #[test]
+    fn hardware_probe_report_is_exposed_from_supervisor() {
+        let supervisor = Supervisor::with_backend_mode(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            RuntimeConfig::default(),
+            RuntimeBackendMode::HardwareProbe,
+        )
+        .unwrap();
+        let report = supervisor.hardware_probe_report();
+
+        assert_eq!(report.backend, RuntimeBackendMode::HardwareProbe);
+        assert_eq!(report.model, Model::S19jPro);
+        assert_eq!(report.board_family, BoardFamily::Xilinx);
+        assert!(report.safe_read_only);
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.interface == "uart" && check.path == "/dev/ttyPS0")
         );
     }
 

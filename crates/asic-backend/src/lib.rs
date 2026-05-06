@@ -1,7 +1,9 @@
 use openmineros_common::{
-    BoardFamily, BoardProfile, Capability, CapabilitySet, ChainStatus, HealthStatus, MinerMode,
-    MinerStatus, Model, RuntimeBackendMode, Severity, SupportLevel, TargetError, supported_targets,
+    BoardFamily, BoardProfile, Capability, CapabilitySet, ChainStatus, HardwareProbeReport,
+    HealthStatus, MinerMode, MinerStatus, Model, ProbeCheck, ProbeStatus, RuntimeBackendMode,
+    Severity, SupportLevel, TargetError, supported_targets,
 };
+use std::path::Path;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -87,6 +89,13 @@ impl BackendHandle {
             Self::HardwareProbe(backend) => backend.chain_statuses(),
         }
     }
+
+    pub fn probe_report(&self) -> HardwareProbeReport {
+        match self {
+            Self::Simulated(backend) => backend.probe_report(),
+            Self::HardwareProbe(backend) => backend.probe_report(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -148,6 +157,20 @@ impl SimulatedBackend {
                 fault: None,
             })
             .collect()
+    }
+
+    pub fn probe_report(&self) -> HardwareProbeReport {
+        HardwareProbeReport::new(
+            self.mode(),
+            self.model,
+            self.profile.family,
+            probe_plan(self.profile.family, ProbeMode::Skipped),
+            vec![
+                "simulated backend does not inspect host hardware".to_string(),
+                "start with --backend hardware-probe for read-only board bring-up checks"
+                    .to_string(),
+            ],
+        )
     }
 }
 
@@ -221,6 +244,169 @@ impl HardwareProbeBackend {
                 fault: Some("hardware probing is not implemented in build 0.1.0".to_string()),
             })
             .collect()
+    }
+
+    pub fn probe_report(&self) -> HardwareProbeReport {
+        HardwareProbeReport::new(
+            self.mode(),
+            self.model,
+            self.profile.family,
+            probe_plan(self.profile.family, ProbeMode::ReadOnlyFilesystem),
+            vec![
+                "checks only test whether expected OS paths exist".to_string(),
+                "no GPIO, UART, I2C, SPI, fan, voltage, clock, or ASIC commands are issued"
+                    .to_string(),
+            ],
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeMode {
+    Skipped,
+    ReadOnlyFilesystem,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProbeExpectation {
+    name: &'static str,
+    interface: &'static str,
+    path: &'static str,
+    required: bool,
+}
+
+fn probe_plan(board: BoardFamily, mode: ProbeMode) -> Vec<ProbeCheck> {
+    probe_expectations(board)
+        .into_iter()
+        .map(|expectation| probe_check(expectation, mode))
+        .collect()
+}
+
+fn probe_check(expectation: ProbeExpectation, mode: ProbeMode) -> ProbeCheck {
+    let (status, detail) = match mode {
+        ProbeMode::Skipped => (
+            ProbeStatus::Skipped,
+            "simulated backend skipped host filesystem probing".to_string(),
+        ),
+        ProbeMode::ReadOnlyFilesystem => {
+            if Path::new(expectation.path).exists() {
+                (
+                    ProbeStatus::Detected,
+                    "expected path exists on this host".to_string(),
+                )
+            } else {
+                (
+                    ProbeStatus::Missing,
+                    "expected path is not present on this host".to_string(),
+                )
+            }
+        }
+    };
+
+    ProbeCheck {
+        name: expectation.name.to_string(),
+        interface: expectation.interface.to_string(),
+        path: expectation.path.to_string(),
+        required: expectation.required,
+        status,
+        detail,
+    }
+}
+
+fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
+    match board {
+        BoardFamily::Xilinx => vec![
+            ProbeExpectation {
+                name: "device tree model",
+                interface: "device-tree",
+                path: "/proc/device-tree/model",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "control UART",
+                interface: "uart",
+                path: "/dev/ttyPS0",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "GPIO control",
+                interface: "gpio",
+                path: "/sys/class/gpio",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "hardware monitor sensors",
+                interface: "hwmon",
+                path: "/sys/class/hwmon",
+                required: false,
+            },
+        ],
+        BoardFamily::BeagleBone => vec![
+            ProbeExpectation {
+                name: "device tree model",
+                interface: "device-tree",
+                path: "/proc/device-tree/model",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "control UART",
+                interface: "uart",
+                path: "/dev/ttyO1",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "GPIO control",
+                interface: "gpio",
+                path: "/sys/class/gpio",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "IIO sensor bus",
+                interface: "iio",
+                path: "/sys/bus/iio/devices",
+                required: false,
+            },
+        ],
+        BoardFamily::Amlogic => vec![
+            ProbeExpectation {
+                name: "device tree model",
+                interface: "device-tree",
+                path: "/proc/device-tree/model",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "control UART",
+                interface: "uart",
+                path: "/dev/ttyS1",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "GPIO control",
+                interface: "gpio",
+                path: "/sys/class/gpio",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "hardware monitor sensors",
+                interface: "hwmon",
+                path: "/sys/class/hwmon",
+                required: false,
+            },
+        ],
+        BoardFamily::Cvitek => vec![
+            ProbeExpectation {
+                name: "device tree model",
+                interface: "device-tree",
+                path: "/proc/device-tree/model",
+                required: false,
+            },
+            ProbeExpectation {
+                name: "safe mode only",
+                interface: "support-policy",
+                path: "unsupported",
+                required: false,
+            },
+        ],
     }
 }
 
@@ -303,5 +489,44 @@ mod tests {
         assert_eq!(miner.hashrate_ths, 0.0);
         assert_eq!(miner.mode, MinerMode::SafeMode);
         assert!(chains.iter().all(|chain| !chain.present));
+    }
+
+    #[test]
+    fn simulated_probe_report_is_skipped() {
+        let backend = SimulatedBackend::new(Model::S19jPro, BoardFamily::Xilinx).unwrap();
+        let report = backend.probe_report();
+
+        assert_eq!(report.backend, RuntimeBackendMode::Simulated);
+        assert!(report.safe_read_only);
+        assert_eq!(report.summary.skipped, report.summary.total);
+        assert!(
+            report
+                .checks
+                .iter()
+                .all(|check| check.status == ProbeStatus::Skipped)
+        );
+    }
+
+    #[test]
+    fn hardware_probe_report_has_required_xilinx_checks() {
+        let backend = HardwareProbeBackend::new(Model::S19jPro, BoardFamily::Xilinx).unwrap();
+        let report = backend.probe_report();
+
+        assert_eq!(report.backend, RuntimeBackendMode::HardwareProbe);
+        assert_eq!(report.board_family, BoardFamily::Xilinx);
+        assert!(report.safe_read_only);
+        assert_eq!(report.summary.total, 4);
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.interface == "uart" && check.path == "/dev/ttyPS0")
+        );
+        assert!(
+            report
+                .checks
+                .iter()
+                .any(|check| check.interface == "gpio" && check.required)
+        );
     }
 }

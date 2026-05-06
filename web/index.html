@@ -506,6 +506,24 @@
               </div>
               <div class="kv" id="boards"></div>
             </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Hardware Probe</h2>
+                <span class="state" id="probe-summary">--</span>
+              </div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Check</th>
+                    <th>Interface</th>
+                    <th>Status</th>
+                    <th>Path</th>
+                  </tr>
+                </thead>
+                <tbody id="probe-checks"></tbody>
+              </table>
+            </section>
           </div>
         </section>
       </div>
@@ -515,6 +533,7 @@
       const state = {
         lastOverview: null,
         hardware: null,
+        probe: null,
         events: [],
       };
 
@@ -551,11 +570,12 @@
           .replace(/'/g, "&#039;");
 
       async function refresh() {
-        const [overviewResponse, hardwareResponse] = await Promise.all([
+        const [overviewResponse, hardwareResponse, probeResponse] = await Promise.all([
           fetch("/api/v1/overview", { cache: "no-store" }),
           state.hardware
             ? Promise.resolve(null)
             : fetch("/api/v1/hardware/targets", { cache: "no-store" }),
+          fetch("/api/v1/hardware/probe", { cache: "no-store" }),
         ]);
         if (!overviewResponse.ok) {
           throw new Error(`overview failed: ${overviewResponse.status}`);
@@ -563,10 +583,14 @@
         if (hardwareResponse && !hardwareResponse.ok) {
           throw new Error(`hardware targets failed: ${hardwareResponse.status}`);
         }
+        if (!probeResponse.ok) {
+          throw new Error(`hardware probe failed: ${probeResponse.status}`);
+        }
         const overview = await overviewResponse.json();
         if (hardwareResponse) {
           state.hardware = await hardwareResponse.json();
         }
+        state.probe = await probeResponse.json();
         state.lastOverview = overview;
         state.events = uniqueEvents(overview.events.events.slice().reverse()).slice(0, 8);
         render(overview);
@@ -581,6 +605,7 @@
         renderTuning(overview.profiles);
         renderSlots(overview.update);
         renderHardware(state.hardware);
+        renderProbe(state.probe);
         renderEvents();
       }
 
@@ -744,6 +769,30 @@
             </div>`,
           )
           .join("");
+      }
+
+      function renderProbe(probe) {
+        if (!probe) return;
+        text(
+          "probe-summary",
+          `${probe.summary.detected}/${probe.summary.total} detected`,
+        );
+        byId("probe-checks").innerHTML = probe.checks
+          .map(
+            (check) => `<tr>
+              <td>${escapeHtml(check.name)}</td>
+              <td>${escapeHtml(check.interface)}</td>
+              <td>${badge(check.status, probeClass(check.status))}</td>
+              <td>${escapeHtml(check.path)}</td>
+            </tr>`,
+          )
+          .join("");
+      }
+
+      function probeClass(status) {
+        if (status === "detected") return "ok";
+        if (status === "missing") return "warn";
+        return "";
       }
 
       function shortSupport(support) {

@@ -52,6 +52,7 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/system/info`
 - `GET /api/v1/overview`
 - `GET /api/v1/hardware/targets`
+- `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
 - `GET /api/v1/chains`
@@ -66,6 +67,8 @@ They are intentionally not flashable firmware images.
 The control plane defaults to the `simulated` backend for local development.
 For board bring-up work, `hardware-probe` exposes the same API shape but stays
 read-only and reports zero hashrate until ASIC bus probing is implemented.
+`GET /api/v1/hardware/probe` checks expected OS paths only; it does not issue
+GPIO, UART, fan, voltage, clock, pool, or ASIC commands.
 
 ```bash
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro
