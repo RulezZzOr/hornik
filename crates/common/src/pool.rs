@@ -167,6 +167,44 @@ pub struct PoolRuntimeSummary {
     pub notes: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolStrategyState {
+    Unconfigured,
+    PlannedNoConnection,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolConnectionRole {
+    Active,
+    Failover,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PoolConnectionPlan {
+    pub priority: u8,
+    pub role: PoolConnectionRole,
+    pub url: String,
+    pub user: String,
+    pub keepalive_interval_seconds: u32,
+    pub reconnect_min_interval_seconds: u32,
+    pub failover_cooldown_seconds: u32,
+    pub latency_warning_ms: u32,
+    pub job_processing_budget_ms: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PoolStrategyResponse {
+    pub state: PoolStrategyState,
+    pub active_priority: Option<u8>,
+    pub failover_priority_order: Vec<u8>,
+    pub persistent_connection_required: bool,
+    pub reconnect_jitter_allowed: bool,
+    pub plans: Vec<PoolConnectionPlan>,
+    pub notes: Vec<String>,
+}
+
 pub fn summarize_pools(pools: &[PoolConfig]) -> PoolSummary {
     let active_priority = pools
         .iter()
@@ -182,6 +220,53 @@ pub fn summarize_pools(pools: &[PoolConfig]) -> PoolSummary {
             .iter()
             .map(|pool| pool.redacted(Some(pool.priority) == active_priority))
             .collect(),
+    }
+}
+
+pub fn plan_pool_strategy(
+    pools: &[PoolConfig],
+    policy: PoolConnectionPolicy,
+) -> PoolStrategyResponse {
+    let mut enabled = pools.iter().filter(|pool| pool.enabled).collect::<Vec<_>>();
+    enabled.sort_by_key(|pool| pool.priority);
+
+    let active_priority = enabled.first().map(|pool| pool.priority);
+    let state = if enabled.is_empty() {
+        PoolStrategyState::Unconfigured
+    } else {
+        PoolStrategyState::PlannedNoConnection
+    };
+
+    PoolStrategyResponse {
+        state,
+        active_priority,
+        failover_priority_order: enabled.iter().map(|pool| pool.priority).collect(),
+        persistent_connection_required: active_priority.is_some(),
+        reconnect_jitter_allowed: false,
+        plans: enabled
+            .into_iter()
+            .enumerate()
+            .map(|(index, pool)| PoolConnectionPlan {
+                priority: pool.priority,
+                role: if index == 0 {
+                    PoolConnectionRole::Active
+                } else {
+                    PoolConnectionRole::Failover
+                },
+                url: pool.url.clone(),
+                user: pool.user.clone(),
+                keepalive_interval_seconds: policy.keepalive_interval_seconds,
+                reconnect_min_interval_seconds: policy.reconnect_min_interval_seconds,
+                failover_cooldown_seconds: policy.failover_cooldown_seconds,
+                latency_warning_ms: policy.latency_warning_ms,
+                job_processing_budget_ms: policy.job_processing_budget_ms,
+            })
+            .collect(),
+        notes: vec![
+            "build 0.1.0 does not open stratum sockets; this is the deterministic connection plan for the future engine".to_string(),
+            "the active pool is held persistently and reconnect attempts are suppressed inside the minimum reconnect interval".to_string(),
+            "failover follows enabled pool priority order and waits for the configured cooldown before changing target".to_string(),
+        ],
     }
 }
 
@@ -329,6 +414,32 @@ mod tests {
         assert_eq!(runtime.active_priority, Some(0));
         assert_eq!(runtime.active_latency_ms, None);
         assert_eq!(runtime.reconnects_total, 0);
+    }
+
+    #[test]
+    fn plans_pool_strategy_by_enabled_priority_without_jitter() {
+        let strategy = plan_pool_strategy(
+            &[pool(2, true), pool(0, false), pool(1, true)],
+            PoolConnectionPolicy::default(),
+        );
+
+        assert_eq!(strategy.state, PoolStrategyState::PlannedNoConnection);
+        assert_eq!(strategy.active_priority, Some(1));
+        assert_eq!(strategy.failover_priority_order, vec![1, 2]);
+        assert!(strategy.persistent_connection_required);
+        assert!(!strategy.reconnect_jitter_allowed);
+        assert_eq!(strategy.plans[0].role, PoolConnectionRole::Active);
+        assert_eq!(strategy.plans[1].role, PoolConnectionRole::Failover);
+        assert_eq!(strategy.plans[0].keepalive_interval_seconds, 30);
+    }
+
+    #[test]
+    fn pool_strategy_is_unconfigured_without_enabled_pools() {
+        let strategy = plan_pool_strategy(&[pool(0, false)], PoolConnectionPolicy::default());
+
+        assert_eq!(strategy.state, PoolStrategyState::Unconfigured);
+        assert_eq!(strategy.active_priority, None);
+        assert!(strategy.plans.is_empty());
     }
 
     fn pool(priority: u8, enabled: bool) -> PoolConfig {

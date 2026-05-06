@@ -12,9 +12,9 @@ use clap::Parser;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
-    HardwareProbeReport, MinerStatus, Model, PoolSummary, ProfilesResponse, RuntimeBackendMode,
-    RuntimeConfig, SupportBundle, SystemInfo, TargetCatalog, TuningPlanResponse, UpdateStatus,
-    target_catalog,
+    HardwareProbeReport, JobPipelinePolicy, MinerStatus, Model, PoolStrategyResponse, PoolSummary,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, SupportBundle, SystemInfo, TargetCatalog,
+    TuningPlanResponse, UpdateStatus, target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -69,8 +69,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/system/info", get(system_info))
         .route("/api/v1/system/health", get(system_health))
         .route("/api/v1/miner/status", get(miner_status))
+        .route("/api/v1/miner/job-pipeline", get(job_pipeline))
         .route("/api/v1/chains", get(chains))
         .route("/api/v1/pools", get(pools))
+        .route("/api/v1/pools/strategy", get(pool_strategy))
         .route("/api/v1/profiles", get(profiles))
         .route("/api/v1/tuning/plan", get(tuning_plan))
         .route("/api/v1/events", get(events))
@@ -118,12 +120,20 @@ async fn miner_status(State(supervisor): State<Arc<Supervisor>>) -> Json<MinerSt
     Json(supervisor.miner_status())
 }
 
+async fn job_pipeline(State(supervisor): State<Arc<Supervisor>>) -> Json<JobPipelinePolicy> {
+    Json(supervisor.job_pipeline())
+}
+
 async fn chains(State(supervisor): State<Arc<Supervisor>>) -> Json<Vec<ChainStatus>> {
     Json(supervisor.chains())
 }
 
 async fn pools(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolSummary> {
     Json(supervisor.pools())
+}
+
+async fn pool_strategy(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolStrategyResponse> {
+    Json(supervisor.pool_strategy())
 }
 
 async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesResponse> {

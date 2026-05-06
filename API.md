@@ -25,9 +25,11 @@ Overview response:
   },
   "health": {},
   "miner": {},
+  "job_pipeline": {},
   "chains": [],
   "pools": {},
   "pool_runtime": {},
+  "pool_strategy": {},
   "profiles": {},
   "contribution": {},
   "update": {},
@@ -166,8 +168,11 @@ Support bundle response:
   "system": {},
   "health": {},
   "miner": {},
+  "job_pipeline": {},
   "chains": [],
   "pools": {},
+  "pool_runtime": {},
+  "pool_strategy": {},
   "profiles": {},
   "contribution": {},
   "events": {}
@@ -209,8 +214,10 @@ bundles, or reboot the device.
 ## Mining
 
 - `GET /api/v1/miner/status`
+- `GET /api/v1/miner/job-pipeline`
 - `GET /api/v1/chains`
 - `GET /api/v1/pools`
+- `GET /api/v1/pools/strategy`
 - `GET /api/v1/profiles`
 - `GET /api/v1/tuning/plan`
 
@@ -264,6 +271,55 @@ Build `0.1.0` does not connect to pools yet, so latency and job-processing
 values are `null` and counters are zero. The policy is intentionally strict:
 low latency, fast job handling, and reconnect suppression are first-class
 requirements for the miner engine.
+
+Pool strategy response:
+
+```json
+{
+  "state": "planned_no_connection",
+  "active_priority": 0,
+  "failover_priority_order": [0, 1],
+  "persistent_connection_required": true,
+  "reconnect_jitter_allowed": false,
+  "plans": [
+    {
+      "priority": 0,
+      "role": "active",
+      "url": "stratum+tcp://pool.example:3333",
+      "user": "account.worker",
+      "keepalive_interval_seconds": 30,
+      "reconnect_min_interval_seconds": 15,
+      "failover_cooldown_seconds": 60,
+      "latency_warning_ms": 500,
+      "job_processing_budget_ms": 50
+    }
+  ]
+}
+```
+
+Build `0.1.0` exposes the deterministic connection plan before networking is
+enabled. Future Stratum code must hold the active pool persistently, suppress
+reconnect loops inside the configured minimum interval, and follow enabled pool
+priority order for failover.
+
+Job pipeline response:
+
+```json
+{
+  "state": "planned_read_only",
+  "notify_to_dispatch_budget_ms": 50,
+  "stale_job_retirement_ms": 500,
+  "max_pending_jobs": 2,
+  "prefer_newest_job": true,
+  "drop_stale_jobs": true,
+  "reset_nonce_on_new_prev_hash": true
+}
+```
+
+Build `0.1.0` does not parse or dispatch real Stratum jobs yet. This endpoint
+sets the runtime contract: keep the pending job queue short, prefer the newest
+pool notify, retire stale work quickly, and reset nonce search when a new
+`prev_hash` arrives.
 
 Profiles response:
 
@@ -366,6 +422,12 @@ omo_miner_hashrate_ths
 omo_miner_power_watts
 omo_miner_efficiency_j_th
 omo_miner_uptime_seconds
+omo_job_notify_to_dispatch_budget_ms
+omo_job_stale_retirement_ms
+omo_job_max_pending_jobs
+omo_job_prefer_newest
+omo_job_drop_stale
+omo_job_reset_nonce_on_new_prev_hash
 omo_system_health_state{state="mining"}
 omo_system_health_severity
 omo_pool_configured_total
@@ -378,6 +440,10 @@ omo_pool_failover_cooldown_seconds
 omo_pool_reconnects_total
 omo_pool_reconnect_suppressed_total
 omo_pool_stale_jobs_total
+omo_pool_strategy_enabled_candidates_total
+omo_pool_strategy_active_priority
+omo_pool_strategy_persistent_connection_required
+omo_pool_strategy_reconnect_jitter_allowed
 omo_tuning_profile_active{profile="stock_like"}
 omo_tuning_profile_available{profile="manual"}
 omo_tuning_plan_writable

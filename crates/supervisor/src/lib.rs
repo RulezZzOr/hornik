@@ -2,10 +2,11 @@ use openmineros_asic_backend::{BackendError, BackendHandle};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
-    EventsResponse, HardwareProbeReport, HealthStatus, MinerStatus, Model, PoolConfig,
-    PoolConnectionPolicy, PoolRuntimeSummary, PoolSummary, ProfilesResponse, RuntimeBackendMode,
-    RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
-    TuningPlanResponse, UpdateStatus, summarize_pool_runtime, summarize_pools,
+    EventsResponse, HardwareProbeReport, HealthStatus, JobPipelinePolicy, MinerStatus, Model,
+    PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, SupportBundle,
+    SupportBundlePrivacy, SystemInfo, TuningConfig, TuningPlanResponse, UpdateStatus,
+    plan_pool_strategy, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -123,6 +124,14 @@ impl Supervisor {
         summarize_pool_runtime(&self.pools, self.pool_policy)
     }
 
+    pub fn pool_strategy(&self) -> PoolStrategyResponse {
+        plan_pool_strategy(&self.pools, self.pool_policy)
+    }
+
+    pub fn job_pipeline(&self) -> JobPipelinePolicy {
+        JobPipelinePolicy::from(self.pool_policy)
+    }
+
     pub fn profiles(&self) -> ProfilesResponse {
         ProfilesResponse::from(self.tuning)
     }
@@ -137,6 +146,8 @@ impl Supervisor {
         let health = self.health();
         let pools = self.pools();
         let pool_runtime = self.pool_runtime();
+        let pool_strategy = self.pool_strategy();
+        let job_pipeline = self.job_pipeline();
         let contribution = self.contribution_status();
         let profiles = self.profiles();
         let tuning_plan = self.tuning_plan();
@@ -164,6 +175,8 @@ impl Supervisor {
                 "pool_count": pools.configured,
                 "enabled_pool_count": pools.enabled,
                 "pool_runtime_state": pool_runtime.state,
+                "pool_strategy_state": pool_strategy.state,
+                "job_pipeline_state": job_pipeline.state,
                 "latency_warning_ms": pool_runtime.policy.latency_warning_ms,
                 "job_processing_budget_ms": pool_runtime.policy.job_processing_budget_ms,
                 "reconnect_min_interval_seconds": pool_runtime.policy.reconnect_min_interval_seconds,
@@ -208,6 +221,22 @@ impl Supervisor {
 
         events.push(
             EventSeverity::Info,
+            "job.pipeline_loaded",
+            "miner",
+            "low-latency job pipeline policy loaded",
+            json!({
+                "state": job_pipeline.state,
+                "notify_to_dispatch_budget_ms": job_pipeline.notify_to_dispatch_budget_ms,
+                "stale_job_retirement_ms": job_pipeline.stale_job_retirement_ms,
+                "max_pending_jobs": job_pipeline.max_pending_jobs,
+                "prefer_newest_job": job_pipeline.prefer_newest_job,
+                "drop_stale_jobs": job_pipeline.drop_stale_jobs,
+                "reset_nonce_on_new_prev_hash": job_pipeline.reset_nonce_on_new_prev_hash,
+            }),
+        );
+
+        events.push(
+            EventSeverity::Info,
             "contribution.target_locked",
             "contribution",
             "official contribution target is locked",
@@ -230,6 +259,21 @@ impl Supervisor {
                 }),
             );
         } else {
+            events.push(
+                EventSeverity::Info,
+                "pool.strategy_loaded",
+                "pool",
+                "low-latency pool connection strategy loaded",
+                json!({
+                    "active_priority": pool_strategy.active_priority,
+                    "failover_priority_order": pool_strategy.failover_priority_order,
+                    "persistent_connection_required": pool_strategy.persistent_connection_required,
+                    "reconnect_jitter_allowed": pool_strategy.reconnect_jitter_allowed,
+                    "keepalive_interval_seconds": self.pool_policy.keepalive_interval_seconds,
+                    "reconnect_min_interval_seconds": self.pool_policy.reconnect_min_interval_seconds,
+                    "failover_cooldown_seconds": self.pool_policy.failover_cooldown_seconds,
+                }),
+            );
             events.push(
                 EventSeverity::Info,
                 "pool.active_selected",
@@ -269,9 +313,11 @@ impl Supervisor {
             system: self.system_info(),
             health: self.health(),
             miner: self.miner_status(),
+            job_pipeline: self.job_pipeline(),
             chains: self.chains(),
             pools: self.pools(),
             pool_runtime: self.pool_runtime(),
+            pool_strategy: self.pool_strategy(),
             profiles: self.profiles(),
             tuning_plan: self.tuning_plan(),
             contribution: self.contribution_status(),
@@ -289,9 +335,11 @@ impl Supervisor {
             system: self.system_info(),
             health: self.health(),
             miner: self.miner_status(),
+            job_pipeline: self.job_pipeline(),
             chains: self.chains(),
             pools: self.pools(),
             pool_runtime: self.pool_runtime(),
+            pool_strategy: self.pool_strategy(),
             profiles: self.profiles(),
             tuning_plan: self.tuning_plan(),
             contribution: self.contribution_status(),
@@ -304,9 +352,11 @@ impl Supervisor {
         let system = self.system_info();
         let health = self.health();
         let miner = self.miner_status();
+        let job_pipeline = self.job_pipeline();
         let contribution = self.contribution_status();
         let pools = self.pools();
         let pool_runtime = self.pool_runtime();
+        let pool_strategy = self.pool_strategy();
         let profiles = self.profiles();
         let tuning_plan = self.tuning_plan();
         let update = self.update_status();
@@ -339,6 +389,36 @@ impl Supervisor {
             "omo_miner_mode_active",
             &[("mode", miner_mode_label(miner.mode))],
             1,
+        );
+        metric(
+            &mut output,
+            "omo_job_notify_to_dispatch_budget_ms",
+            job_pipeline.notify_to_dispatch_budget_ms,
+        );
+        metric(
+            &mut output,
+            "omo_job_stale_retirement_ms",
+            job_pipeline.stale_job_retirement_ms,
+        );
+        metric(
+            &mut output,
+            "omo_job_max_pending_jobs",
+            job_pipeline.max_pending_jobs,
+        );
+        metric(
+            &mut output,
+            "omo_job_prefer_newest",
+            bool_value(job_pipeline.prefer_newest_job),
+        );
+        metric(
+            &mut output,
+            "omo_job_drop_stale",
+            bool_value(job_pipeline.drop_stale_jobs),
+        );
+        metric(
+            &mut output,
+            "omo_job_reset_nonce_on_new_prev_hash",
+            bool_value(job_pipeline.reset_nonce_on_new_prev_hash),
         );
 
         labeled_metric(
@@ -410,6 +490,26 @@ impl Supervisor {
             &mut output,
             "omo_pool_stale_jobs_total",
             pool_runtime.stale_jobs_total,
+        );
+        metric(
+            &mut output,
+            "omo_pool_strategy_enabled_candidates_total",
+            pool_strategy.plans.len(),
+        );
+        metric(
+            &mut output,
+            "omo_pool_strategy_active_priority",
+            pool_strategy.active_priority.map_or(-1_i32, i32::from),
+        );
+        metric(
+            &mut output,
+            "omo_pool_strategy_persistent_connection_required",
+            bool_value(pool_strategy.persistent_connection_required),
+        );
+        metric(
+            &mut output,
+            "omo_pool_strategy_reconnect_jitter_allowed",
+            bool_value(pool_strategy.reconnect_jitter_allowed),
         );
 
         labeled_metric(
@@ -616,6 +716,12 @@ mod tests {
                 .iter()
                 .any(|event| event.event_type == "contribution.target_locked")
         );
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "job.pipeline_loaded")
+        );
     }
 
     #[test]
@@ -648,6 +754,12 @@ mod tests {
                 .events
                 .iter()
                 .any(|event| event.event_type == "pool.active_selected")
+        );
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "pool.strategy_loaded")
         );
         assert!(
             !events
@@ -818,6 +930,7 @@ mod tests {
         let supervisor =
             Supervisor::with_config(Model::S19jPro, BoardFamily::Xilinx, config).unwrap();
         let runtime = supervisor.pool_runtime();
+        let job_pipeline = supervisor.job_pipeline();
         let overview = supervisor.dashboard_overview();
         let metrics = supervisor.prometheus_metrics();
 
@@ -828,8 +941,24 @@ mod tests {
             overview.pool_runtime.policy.reconnect_min_interval_seconds,
             20
         );
+        assert_eq!(overview.pool_strategy.active_priority, Some(0));
+        assert_eq!(overview.pool_strategy.plans.len(), 1);
+        assert!(overview.pool_strategy.persistent_connection_required);
+        assert!(!overview.pool_strategy.reconnect_jitter_allowed);
+        assert_eq!(
+            overview.pool_strategy.plans[0].keepalive_interval_seconds,
+            15
+        );
+        assert_eq!(job_pipeline.notify_to_dispatch_budget_ms, 25);
+        assert_eq!(overview.job_pipeline.stale_job_retirement_ms, 250);
+        assert!(overview.job_pipeline.prefer_newest_job);
+        assert!(overview.job_pipeline.drop_stale_jobs);
         assert!(metrics.contains("omo_pool_latency_warning_ms 250"));
         assert!(metrics.contains("omo_pool_job_processing_budget_ms 25"));
+        assert!(metrics.contains("omo_pool_strategy_enabled_candidates_total 1"));
+        assert!(metrics.contains("omo_pool_strategy_persistent_connection_required 1"));
+        assert!(metrics.contains("omo_job_notify_to_dispatch_budget_ms 25"));
+        assert!(metrics.contains("omo_job_drop_stale 1"));
         assert!(!metrics.contains("super-secret"));
     }
 

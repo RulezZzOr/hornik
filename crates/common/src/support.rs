@@ -1,7 +1,8 @@
 use crate::status::HealthStatusResponse;
 use crate::{
-    ChainStatus, ContributionStatus, EventsResponse, MinerStatus, PoolRuntimeSummary, PoolSummary,
-    ProfilesResponse, SystemInfo, TuningPlanResponse,
+    ChainStatus, ContributionStatus, EventsResponse, JobPipelinePolicy, MinerStatus,
+    PoolRuntimeSummary, PoolStrategyResponse, PoolSummary, ProfilesResponse, SystemInfo,
+    TuningPlanResponse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -13,9 +14,11 @@ pub struct SupportBundle {
     pub system: SystemInfo,
     pub health: HealthStatusResponse,
     pub miner: MinerStatus,
+    pub job_pipeline: JobPipelinePolicy,
     pub chains: Vec<ChainStatus>,
     pub pools: PoolSummary,
     pub pool_runtime: PoolRuntimeSummary,
+    pub pool_strategy: PoolStrategyResponse,
     pub profiles: ProfilesResponse,
     pub tuning_plan: TuningPlanResponse,
     pub contribution: ContributionStatus,

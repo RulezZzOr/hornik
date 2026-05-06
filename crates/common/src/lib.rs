@@ -2,6 +2,7 @@ pub mod board;
 pub mod config;
 pub mod contribution;
 pub mod event;
+pub mod job;
 pub mod manifest;
 pub mod overview;
 pub mod pool;
@@ -22,14 +23,16 @@ pub use contribution::{
     MAX_CONTRIBUTION_RATE_PERCENT, MUTABLE_CONTRIBUTION_FIELDS, default_contribution_endpoints,
 };
 pub use event::{EventBuilder, EventEnvelope, EventRecord, EventSeverity, EventsResponse};
+pub use job::{JobPipelinePolicy, JobPipelineState};
 pub use manifest::{
     ArtifactManifest, ManifestError, ReleaseManifest, ReleaseSignature, VerificationReport,
     verify_manifest_file,
 };
 pub use overview::DashboardOverview;
 pub use pool::{
-    PoolConfig, PoolConfigError, PoolConnectionPolicy, PoolInfo, PoolRuntimeState,
-    PoolRuntimeSummary, PoolSummary, summarize_pool_runtime, summarize_pools, validate_pools,
+    PoolConfig, PoolConfigError, PoolConnectionPlan, PoolConnectionPolicy, PoolConnectionRole,
+    PoolInfo, PoolRuntimeState, PoolRuntimeSummary, PoolStrategyResponse, PoolStrategyState,
+    PoolSummary, plan_pool_strategy, summarize_pool_runtime, summarize_pools, validate_pools,
 };
 pub use probe::{HardwareProbeReport, HardwareProbeSummary, ProbeCheck, ProbeStatus};
 pub use status::{

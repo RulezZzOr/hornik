@@ -439,6 +439,27 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Pool Strategy</h2>
+                <span class="state" id="pool-strategy-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Active</div>
+                  <div class="kv-value" id="pool-strategy-active">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Failover</div>
+                  <div class="kv-value" id="pool-strategy-failover">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Connection</div>
+                  <div class="kv-value" id="pool-strategy-connection">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Events</h2>
                 <span class="state" id="event-count">--</span>
               </div>
@@ -491,6 +512,27 @@
                 <div class="kv-row">
                   <div class="kv-key">Capabilities</div>
                   <div class="kv-value" id="capabilities">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Job Pipeline</h2>
+                <span class="state" id="job-pipeline-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Dispatch</div>
+                  <div class="kv-value" id="job-dispatch-budget">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Queue</div>
+                  <div class="kv-value" id="job-queue">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Stale Work</div>
+                  <div class="kv-value" id="job-stale">--</div>
                 </div>
               </div>
             </section>
@@ -644,6 +686,8 @@
         renderChains(overview.chains);
         renderPools(overview.pools);
         renderPoolRuntime(overview.pool_runtime);
+        renderPoolStrategy(overview.pool_strategy);
+        renderJobPipeline(overview.job_pipeline);
         renderSystem(overview);
         renderTuning(overview.profiles);
         renderTuningPlan(overview.tuning_plan);
@@ -738,6 +782,46 @@
         text(
           "pool-counters",
           `${runtime.reconnects_total} reconnects / ${runtime.reconnect_suppressed_total} suppressed / ${runtime.stale_jobs_total} stale jobs`,
+        );
+      }
+
+      function renderPoolStrategy(strategy) {
+        if (!strategy) return;
+        text("pool-strategy-state", strategy.state);
+        text(
+          "pool-strategy-active",
+          strategy.active_priority === null
+            ? "--"
+            : `priority ${strategy.active_priority}`,
+        );
+        text(
+          "pool-strategy-failover",
+          strategy.failover_priority_order.length
+            ? strategy.failover_priority_order
+                .map((priority) => `p${priority}`)
+                .join(" -> ")
+            : "--",
+        );
+        text(
+          "pool-strategy-connection",
+          `${strategy.persistent_connection_required ? "persistent" : "idle"} / jitter ${strategy.reconnect_jitter_allowed ? "allowed" : "off"}`,
+        );
+      }
+
+      function renderJobPipeline(pipeline) {
+        if (!pipeline) return;
+        text("job-pipeline-state", pipeline.state);
+        text(
+          "job-dispatch-budget",
+          `${pipeline.notify_to_dispatch_budget_ms} ms notify -> dispatch`,
+        );
+        text(
+          "job-queue",
+          `${pipeline.max_pending_jobs} max / newest ${pipeline.prefer_newest_job ? "first" : "normal"}`,
+        );
+        text(
+          "job-stale",
+          `${pipeline.drop_stale_jobs ? "drop stale" : "keep stale"} / retire ${pipeline.stale_job_retirement_ms} ms`,
         );
       }
 

@@ -104,6 +104,7 @@ yet.
 Pool configuration affects event output:
 
 - no enabled pools emits `pool.unconfigured`,
+- at least one enabled pool emits `pool.strategy_loaded`,
 - at least one enabled pool emits `pool.active_selected`.
 
 Support bundles expose pool metadata with `password_set`, but never include
@@ -136,6 +137,19 @@ Validation rules:
 Build `0.1.0` exposes policy and zeroed runtime counters only. Real stratum
 latency, job processing, stale-job, and reconnect counters come with the network
 engine.
+
+The derived pool strategy is also exposed through API/UI. It sorts enabled
+pools by priority, marks the lowest priority as active, keeps failover order
+deterministic, requires persistent connections, and disallows reconnect jitter
+in build `0.1.0`.
+
+The same policy drives the read-only job pipeline contract:
+
+- `job_processing_budget_ms` becomes the notify-to-dispatch budget,
+- `latency_warning_ms` becomes the stale-job retirement window,
+- pending job queue depth is capped at `2`,
+- newest jobs are preferred,
+- stale jobs are dropped after a new `prev_hash`.
 
 ## Tuning
 
