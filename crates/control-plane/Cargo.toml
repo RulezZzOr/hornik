@@ -1,0 +1,18 @@
+[package]
+name = "openmineros-control-plane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+openmineros-common = { path = "../common" }
+openmineros-supervisor = { path = "../supervisor" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+

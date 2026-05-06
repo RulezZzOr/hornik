@@ -1,0 +1,15 @@
+[package]
+name = "openmineros-asic-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+openmineros-board-aml = { path = "../board-aml" }
+openmineros-board-bb = { path = "../board-bb" }
+openmineros-board-xil = { path = "../board-xil" }
+openmineros-common = { path = "../common" }
+thiserror.workspace = true
+
