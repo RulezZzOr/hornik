@@ -15,6 +15,7 @@ Build `0.1.0` is a safe development baseline:
 - Pool latency, job processing, and reconnect policy surfaced for the future stratum engine.
 - Deterministic pool connection strategy for persistent active pool, stable failover order, and reconnect suppression.
 - Read-only job pipeline policy for newest-job priority, short queues, and stale-work retirement.
+- Read-only Stratum V1 engine contract with no sockets opened in build `0.1.0`.
 - Validated tuning profile config with read-only profile API.
 - Read-only autotune plan: baseline, downclock efficiency, upclock stability, then voltage trim.
 - Deterministic in-memory event snapshot API.
@@ -61,6 +62,7 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/miner/status`
 - `GET /api/v1/miner/job-pipeline`
 - `GET /api/v1/chains`
+- `GET /api/v1/stratum/status`
 - `GET /api/v1/contribution/status`
 - `GET /api/v1/pools/strategy`
 - `GET /metrics`

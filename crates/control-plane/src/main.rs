@@ -13,8 +13,8 @@ use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
     HardwareProbeReport, JobPipelinePolicy, MinerStatus, Model, PoolStrategyResponse, PoolSummary,
-    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, SupportBundle, SystemInfo, TargetCatalog,
-    TuningPlanResponse, UpdateStatus, target_catalog,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, StratumEngineStatus, SupportBundle,
+    SystemInfo, TargetCatalog, TuningPlanResponse, UpdateStatus, target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -73,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/chains", get(chains))
         .route("/api/v1/pools", get(pools))
         .route("/api/v1/pools/strategy", get(pool_strategy))
+        .route("/api/v1/stratum/status", get(stratum_status))
         .route("/api/v1/profiles", get(profiles))
         .route("/api/v1/tuning/plan", get(tuning_plan))
         .route("/api/v1/events", get(events))
@@ -134,6 +135,10 @@ async fn pools(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolSummary> {
 
 async fn pool_strategy(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolStrategyResponse> {
     Json(supervisor.pool_strategy())
+}
+
+async fn stratum_status(State(supervisor): State<Arc<Supervisor>>) -> Json<StratumEngineStatus> {
+    Json(supervisor.stratum_status())
 }
 
 async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesResponse> {

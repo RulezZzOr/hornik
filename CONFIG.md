@@ -151,6 +151,21 @@ The same policy drives the read-only job pipeline contract:
 - newest jobs are preferred,
 - stale jobs are dropped after a new `prev_hash`.
 
+## Stratum
+
+Build `0.1.0` exposes a Stratum V1 status model and message classifier only.
+It does not open sockets, subscribe, authorize, dispatch jobs, or submit
+shares.
+
+The future Stratum engine must follow the pool policy and job pipeline:
+
+- keep the active pool connection persistent,
+- suppress reconnect loops,
+- process `mining.notify` inside the job budget,
+- prefer the newest job,
+- retire stale work quickly,
+- locally precheck shares before `mining.submit`.
+
 ## Tuning
 
 Tuning config selects the active high-level profile.

@@ -8,6 +8,7 @@ pub mod overview;
 pub mod pool;
 pub mod probe;
 pub mod status;
+pub mod stratum;
 pub mod support;
 pub mod tuning;
 pub mod update;
@@ -38,6 +39,11 @@ pub use probe::{HardwareProbeReport, HardwareProbeSummary, ProbeCheck, ProbeStat
 pub use status::{
     ChainStatus, HealthStatus, HealthStatusResponse, MinerMode, MinerStatus, RuntimeBackendMode,
     RuntimeBackendModeParseError, Severity, SystemInfo,
+};
+pub use stratum::{
+    ShareValidationMode, StratumConnectionState, StratumEngineState, StratumEngineStatus,
+    StratumJobTemplate, StratumMessageClassification, StratumMessageError, StratumMessageKind,
+    StratumProtocol, classify_stratum_message,
 };
 pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{

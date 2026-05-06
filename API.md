@@ -26,6 +26,7 @@ Overview response:
   "health": {},
   "miner": {},
   "job_pipeline": {},
+  "stratum": {},
   "chains": [],
   "pools": {},
   "pool_runtime": {},
@@ -169,6 +170,7 @@ Support bundle response:
   "health": {},
   "miner": {},
   "job_pipeline": {},
+  "stratum": {},
   "chains": [],
   "pools": {},
   "pool_runtime": {},
@@ -218,6 +220,7 @@ bundles, or reboot the device.
 - `GET /api/v1/chains`
 - `GET /api/v1/pools`
 - `GET /api/v1/pools/strategy`
+- `GET /api/v1/stratum/status`
 - `GET /api/v1/profiles`
 - `GET /api/v1/tuning/plan`
 
@@ -320,6 +323,32 @@ Build `0.1.0` does not parse or dispatch real Stratum jobs yet. This endpoint
 sets the runtime contract: keep the pending job queue short, prefer the newest
 pool notify, retire stale work quickly, and reset nonce search when a new
 `prev_hash` arrives.
+
+Stratum status response:
+
+```json
+{
+  "state": "planned_no_socket",
+  "protocol": "v1",
+  "connection": "not_started",
+  "socket_open": false,
+  "active_pool_priority": 0,
+  "subscribed": false,
+  "authorized": false,
+  "current_difficulty": null,
+  "active_job": null,
+  "pending_jobs": 0,
+  "shares_submitted": 0,
+  "shares_accepted": 0,
+  "shares_rejected": 0,
+  "share_validation": "planned_local_precheck"
+}
+```
+
+Build `0.1.0` includes a Stratum V1 message classifier for `mining.notify`
+and `mining.set_difficulty`, but does not open sockets, subscribe, authorize,
+dispatch jobs, or submit shares. Future networking code must keep pool secrets
+out of metrics and run local share prechecks before submit.
 
 Profiles response:
 
@@ -428,6 +457,14 @@ omo_job_max_pending_jobs
 omo_job_prefer_newest
 omo_job_drop_stale
 omo_job_reset_nonce_on_new_prev_hash
+omo_stratum_socket_open
+omo_stratum_subscribed
+omo_stratum_authorized
+omo_stratum_active_pool_priority
+omo_stratum_pending_jobs
+omo_stratum_shares_submitted_total
+omo_stratum_shares_accepted_total
+omo_stratum_shares_rejected_total
 omo_system_health_state{state="mining"}
 omo_system_health_severity
 omo_pool_configured_total

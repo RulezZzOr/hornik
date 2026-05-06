@@ -4,9 +4,9 @@ use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
     EventsResponse, HardwareProbeReport, HealthStatus, JobPipelinePolicy, MinerStatus, Model,
     PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary,
-    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, SupportBundle,
-    SupportBundlePrivacy, SystemInfo, TuningConfig, TuningPlanResponse, UpdateStatus,
-    plan_pool_strategy, summarize_pool_runtime, summarize_pools,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, StratumEngineStatus,
+    SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig, TuningPlanResponse,
+    UpdateStatus, plan_pool_strategy, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -132,6 +132,10 @@ impl Supervisor {
         JobPipelinePolicy::from(self.pool_policy)
     }
 
+    pub fn stratum_status(&self) -> StratumEngineStatus {
+        StratumEngineStatus::planned(self.pool_strategy().active_priority, &self.job_pipeline())
+    }
+
     pub fn profiles(&self) -> ProfilesResponse {
         ProfilesResponse::from(self.tuning)
     }
@@ -148,6 +152,7 @@ impl Supervisor {
         let pool_runtime = self.pool_runtime();
         let pool_strategy = self.pool_strategy();
         let job_pipeline = self.job_pipeline();
+        let stratum = self.stratum_status();
         let contribution = self.contribution_status();
         let profiles = self.profiles();
         let tuning_plan = self.tuning_plan();
@@ -177,6 +182,8 @@ impl Supervisor {
                 "pool_runtime_state": pool_runtime.state,
                 "pool_strategy_state": pool_strategy.state,
                 "job_pipeline_state": job_pipeline.state,
+                "stratum_state": stratum.state,
+                "stratum_socket_open": stratum.socket_open,
                 "latency_warning_ms": pool_runtime.policy.latency_warning_ms,
                 "job_processing_budget_ms": pool_runtime.policy.job_processing_budget_ms,
                 "reconnect_min_interval_seconds": pool_runtime.policy.reconnect_min_interval_seconds,
@@ -232,6 +239,23 @@ impl Supervisor {
                 "prefer_newest_job": job_pipeline.prefer_newest_job,
                 "drop_stale_jobs": job_pipeline.drop_stale_jobs,
                 "reset_nonce_on_new_prev_hash": job_pipeline.reset_nonce_on_new_prev_hash,
+            }),
+        );
+
+        events.push(
+            EventSeverity::Info,
+            "stratum.engine_planned",
+            "stratum",
+            "Stratum V1 engine contract loaded without opening sockets",
+            json!({
+                "state": stratum.state,
+                "protocol": stratum.protocol,
+                "connection": stratum.connection,
+                "socket_open": stratum.socket_open,
+                "active_pool_priority": stratum.active_pool_priority,
+                "subscribed": stratum.subscribed,
+                "authorized": stratum.authorized,
+                "share_validation": stratum.share_validation,
             }),
         );
 
@@ -314,6 +338,7 @@ impl Supervisor {
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
+            stratum: self.stratum_status(),
             chains: self.chains(),
             pools: self.pools(),
             pool_runtime: self.pool_runtime(),
@@ -336,6 +361,7 @@ impl Supervisor {
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
+            stratum: self.stratum_status(),
             chains: self.chains(),
             pools: self.pools(),
             pool_runtime: self.pool_runtime(),
@@ -353,6 +379,7 @@ impl Supervisor {
         let health = self.health();
         let miner = self.miner_status();
         let job_pipeline = self.job_pipeline();
+        let stratum = self.stratum_status();
         let contribution = self.contribution_status();
         let pools = self.pools();
         let pool_runtime = self.pool_runtime();
@@ -419,6 +446,46 @@ impl Supervisor {
             &mut output,
             "omo_job_reset_nonce_on_new_prev_hash",
             bool_value(job_pipeline.reset_nonce_on_new_prev_hash),
+        );
+        metric(
+            &mut output,
+            "omo_stratum_socket_open",
+            bool_value(stratum.socket_open),
+        );
+        metric(
+            &mut output,
+            "omo_stratum_subscribed",
+            bool_value(stratum.subscribed),
+        );
+        metric(
+            &mut output,
+            "omo_stratum_authorized",
+            bool_value(stratum.authorized),
+        );
+        metric(
+            &mut output,
+            "omo_stratum_active_pool_priority",
+            stratum.active_pool_priority.map_or(-1_i32, i32::from),
+        );
+        metric(
+            &mut output,
+            "omo_stratum_pending_jobs",
+            stratum.pending_jobs,
+        );
+        metric(
+            &mut output,
+            "omo_stratum_shares_submitted_total",
+            stratum.shares_submitted,
+        );
+        metric(
+            &mut output,
+            "omo_stratum_shares_accepted_total",
+            stratum.shares_accepted,
+        );
+        metric(
+            &mut output,
+            "omo_stratum_shares_rejected_total",
+            stratum.shares_rejected,
         );
 
         labeled_metric(
@@ -722,6 +789,12 @@ mod tests {
                 .iter()
                 .any(|event| event.event_type == "job.pipeline_loaded")
         );
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "stratum.engine_planned")
+        );
     }
 
     #[test]
@@ -953,12 +1026,17 @@ mod tests {
         assert_eq!(overview.job_pipeline.stale_job_retirement_ms, 250);
         assert!(overview.job_pipeline.prefer_newest_job);
         assert!(overview.job_pipeline.drop_stale_jobs);
+        assert!(!overview.stratum.socket_open);
+        assert_eq!(overview.stratum.active_pool_priority, Some(0));
+        assert!(!overview.stratum.authorized);
         assert!(metrics.contains("omo_pool_latency_warning_ms 250"));
         assert!(metrics.contains("omo_pool_job_processing_budget_ms 25"));
         assert!(metrics.contains("omo_pool_strategy_enabled_candidates_total 1"));
         assert!(metrics.contains("omo_pool_strategy_persistent_connection_required 1"));
         assert!(metrics.contains("omo_job_notify_to_dispatch_budget_ms 25"));
         assert!(metrics.contains("omo_job_drop_stale 1"));
+        assert!(metrics.contains("omo_stratum_socket_open 0"));
+        assert!(metrics.contains("omo_stratum_active_pool_priority 0"));
         assert!(!metrics.contains("super-secret"));
     }
 

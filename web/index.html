@@ -539,6 +539,27 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Stratum</h2>
+                <span class="state" id="stratum-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Connection</div>
+                  <div class="kv-value" id="stratum-connection">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Session</div>
+                  <div class="kv-value" id="stratum-session">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Shares</div>
+                  <div class="kv-value" id="stratum-shares">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Tuning</h2>
                 <span class="state" id="tuning-mode">--</span>
               </div>
@@ -688,6 +709,7 @@
         renderPoolRuntime(overview.pool_runtime);
         renderPoolStrategy(overview.pool_strategy);
         renderJobPipeline(overview.job_pipeline);
+        renderStratum(overview.stratum);
         renderSystem(overview);
         renderTuning(overview.profiles);
         renderTuningPlan(overview.tuning_plan);
@@ -822,6 +844,23 @@
         text(
           "job-stale",
           `${pipeline.drop_stale_jobs ? "drop stale" : "keep stale"} / retire ${pipeline.stale_job_retirement_ms} ms`,
+        );
+      }
+
+      function renderStratum(stratum) {
+        if (!stratum) return;
+        text("stratum-state", stratum.state);
+        text(
+          "stratum-connection",
+          `${stratum.protocol} / ${stratum.connection} / socket ${stratum.socket_open ? "open" : "closed"}`,
+        );
+        text(
+          "stratum-session",
+          `pool ${stratum.active_pool_priority === null ? "--" : stratum.active_pool_priority} / sub ${bool(stratum.subscribed)} / auth ${bool(stratum.authorized)}`,
+        );
+        text(
+          "stratum-shares",
+          `${stratum.shares_submitted} submitted / ${stratum.shares_accepted} accepted / ${stratum.shares_rejected} rejected`,
         );
       }
 
