@@ -1,17 +1,17 @@
-use openmineros_asic_backend::{BackendError, SimulatedBackend};
+use openmineros_asic_backend::{BackendError, BackendHandle};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
     EventsResponse, HealthStatus, MinerStatus, Model, PoolConfig, PoolSummary, ProfilesResponse,
-    RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
-    UpdateStatus, summarize_pools,
+    RuntimeBackendMode, RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo,
+    TuningConfig, UpdateStatus, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub struct Supervisor {
-    backend: SimulatedBackend,
+    backend: BackendHandle,
     booted_at: Instant,
     active_slot: String,
     contribution: ContributionConfig,
@@ -29,8 +29,17 @@ impl Supervisor {
         board: BoardFamily,
         config: RuntimeConfig,
     ) -> Result<Self, BackendError> {
+        Self::with_backend_mode(model, board, config, RuntimeBackendMode::Simulated)
+    }
+
+    pub fn with_backend_mode(
+        model: Model,
+        board: BoardFamily,
+        config: RuntimeConfig,
+        backend_mode: RuntimeBackendMode,
+    ) -> Result<Self, BackendError> {
         Ok(Self {
-            backend: SimulatedBackend::new(model, board)?,
+            backend: BackendHandle::new(backend_mode, model, board)?,
             booted_at: Instant::now(),
             active_slot: "slot_a".to_string(),
             contribution: config.contribution,
@@ -43,6 +52,7 @@ impl Supervisor {
         SystemInfo {
             model: self.backend.model(),
             board_family: self.backend.profile().family,
+            backend: self.backend.mode(),
             firmware_version: env!("CARGO_PKG_VERSION").to_string(),
             active_slot: self.active_slot.clone(),
             uptime_seconds: self.uptime_seconds(),
@@ -57,8 +67,9 @@ impl Supervisor {
 
     pub fn health(&self) -> HealthStatusResponse {
         let support = self.backend.support();
+        let runtime = self.backend.runtime_status();
         let mut issues = Vec::new();
-        let severity = match support {
+        let support_severity = match support {
             openmineros_common::SupportLevel::MvpStable => Severity::Ok,
             openmineros_common::SupportLevel::Experimental => {
                 issues.push("target is experimental in build 0.1.0".to_string());
@@ -69,9 +80,11 @@ impl Supervisor {
                 Severity::Error
             }
         };
+        issues.extend(runtime.issues);
+        let severity = max_severity(support_severity, runtime.severity);
 
         HealthStatusResponse {
-            state: HealthStatus::Mining,
+            state: runtime.state,
             severity,
             issues,
             active_slot: self.active_slot.clone(),
@@ -81,7 +94,9 @@ impl Supervisor {
 
     pub fn miner_status(&self) -> MinerStatus {
         let mut status = self.backend.miner_status();
-        status.mode = self.tuning.mode.into();
+        if self.backend.mode() == RuntimeBackendMode::Simulated {
+            status.mode = self.tuning.mode.into();
+        }
         status
     }
 
@@ -117,6 +132,7 @@ impl Supervisor {
             json!({
                 "model": system_info.model,
                 "board_family": system_info.board_family,
+                "backend": system_info.backend,
                 "firmware_version": system_info.firmware_version,
                 "active_slot": system_info.active_slot,
             }),
@@ -131,10 +147,25 @@ impl Supervisor {
                 "pool_count": pools.configured,
                 "enabled_pool_count": pools.enabled,
                 "tuning_mode": profiles.active,
+                "backend": system_info.backend,
                 "contribution_enabled": contribution.enabled,
                 "contribution_rate_percent": contribution.rate_percent,
             }),
         );
+
+        if self.backend.mode() == RuntimeBackendMode::HardwareProbe {
+            events.push(
+                EventSeverity::Warn,
+                "backend.hardware_probe_scaffold",
+                "asic-backend",
+                "hardware probe backend is read-only in build 0.1.0",
+                json!({
+                    "backend": self.backend.mode(),
+                    "model": system_info.model,
+                    "board_family": system_info.board_family,
+                }),
+            );
+        }
 
         events.push(
             EventSeverity::Info,
@@ -393,6 +424,14 @@ fn bool_value(value: bool) -> u8 {
     u8::from(value)
 }
 
+fn max_severity(left: Severity, right: Severity) -> Severity {
+    if severity_value(left) >= severity_value(right) {
+        left
+    } else {
+        right
+    }
+}
+
 fn severity_value(severity: Severity) -> u8 {
     match severity {
         Severity::Ok => 0,
@@ -553,6 +592,41 @@ mod tests {
         assert_eq!(status.active_slot, "slot_a");
         assert_eq!(status.inactive_slot, "slot_b");
         assert!(!status.boot_once_pending);
+    }
+
+    #[test]
+    fn hardware_probe_mode_reports_safe_read_only_state() {
+        let supervisor = Supervisor::with_backend_mode(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            RuntimeConfig::default(),
+            RuntimeBackendMode::HardwareProbe,
+        )
+        .unwrap();
+        let info = supervisor.system_info();
+        let health = supervisor.health();
+        let miner = supervisor.miner_status();
+        let chains = supervisor.chains();
+        let events = supervisor.events();
+
+        assert_eq!(info.backend, RuntimeBackendMode::HardwareProbe);
+        assert_eq!(health.state, HealthStatus::Recovering);
+        assert_eq!(health.severity, Severity::Warn);
+        assert!(
+            health
+                .issues
+                .iter()
+                .any(|issue| issue.contains("read-only"))
+        );
+        assert_eq!(miner.hashrate_ths, 0.0);
+        assert_eq!(miner.mode, openmineros_common::MinerMode::SafeMode);
+        assert!(chains.iter().all(|chain| !chain.present));
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "backend.hardware_probe_scaffold")
+        );
     }
 
     #[test]

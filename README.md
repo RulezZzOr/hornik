@@ -61,6 +61,20 @@ They are intentionally not flashable firmware images.
 `omo-commander matrix` returns the same hardware catalog used by
 `GET /api/v1/hardware/targets`.
 
+## Runtime Backends
+
+The control plane defaults to the `simulated` backend for local development.
+For board bring-up work, `hardware-probe` exposes the same API shape but stays
+read-only and reports zero hashrate until ASIC bus probing is implemented.
+
+```bash
+make run-control-plane BOARD=s19-xil MODEL=s19j-pro
+cargo run -p openmineros-control-plane -- \
+  --board s19-xil \
+  --model s19j-pro \
+  --backend hardware-probe
+```
+
 ## Config
 
 Build `0.1.0` includes a minimal TOML config parser. In official builds,

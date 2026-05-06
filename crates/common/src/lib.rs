@@ -30,7 +30,8 @@ pub use pool::{
     PoolConfig, PoolConfigError, PoolInfo, PoolSummary, summarize_pools, validate_pools,
 };
 pub use status::{
-    ChainStatus, HealthStatus, HealthStatusResponse, MinerMode, MinerStatus, Severity, SystemInfo,
+    ChainStatus, HealthStatus, HealthStatusResponse, MinerMode, MinerStatus, RuntimeBackendMode,
+    RuntimeBackendModeParseError, Severity, SystemInfo,
 };
 pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{

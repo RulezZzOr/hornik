@@ -456,6 +456,10 @@
                   <div class="kv-value" id="firmware">--</div>
                 </div>
                 <div class="kv-row">
+                  <div class="kv-key">Backend</div>
+                  <div class="kv-value" id="backend">--</div>
+                </div>
+                <div class="kv-row">
                   <div class="kv-key">Uptime</div>
                   <div class="kv-value" id="uptime">--</div>
                 </div>
@@ -658,6 +662,7 @@
         text("slot", system.active_slot);
         text("target", `${system.model} on ${system.board_family}`);
         text("firmware", system.firmware_version);
+        text("backend", system.backend);
         text("uptime", formatSeconds(system.uptime_seconds));
         text("capabilities", system.capabilities.flags.join(", ") || "--");
       }

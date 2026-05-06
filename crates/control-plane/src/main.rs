@@ -12,8 +12,8 @@ use clap::Parser;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
-    MinerStatus, Model, PoolSummary, ProfilesResponse, RuntimeConfig, SupportBundle, SystemInfo,
-    TargetCatalog, UpdateStatus, target_catalog,
+    MinerStatus, Model, PoolSummary, ProfilesResponse, RuntimeBackendMode, RuntimeConfig,
+    SupportBundle, SystemInfo, TargetCatalog, UpdateStatus, target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -28,6 +28,8 @@ struct Cli {
     board: String,
     #[arg(long, default_value = "s19j-pro")]
     model: String,
+    #[arg(long, default_value_t = RuntimeBackendMode::Simulated)]
+    backend: RuntimeBackendMode,
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: SocketAddr,
     #[arg(long)]
@@ -51,7 +53,12 @@ async fn main() -> anyhow::Result<()> {
             .with_context(|| format!("invalid config {}", path.display()))?,
         None => RuntimeConfig::default(),
     };
-    let supervisor = Arc::new(Supervisor::with_config(model, board, config)?);
+    let supervisor = Arc::new(Supervisor::with_backend_mode(
+        model,
+        board,
+        config,
+        cli.backend,
+    )?);
 
     let app = Router::new()
         .route("/", get(index))

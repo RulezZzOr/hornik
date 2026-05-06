@@ -1,10 +1,51 @@
 use crate::{BoardFamily, CapabilitySet, Model};
 use serde::{Deserialize, Serialize};
+use std::{fmt, str::FromStr};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimeBackendMode {
+    #[default]
+    Simulated,
+    HardwareProbe,
+}
+
+impl RuntimeBackendMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Simulated => "simulated",
+            Self::HardwareProbe => "hardware-probe",
+        }
+    }
+}
+
+impl fmt::Display for RuntimeBackendMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl FromStr for RuntimeBackendMode {
+    type Err = RuntimeBackendModeParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "simulated" | "sim" => Ok(Self::Simulated),
+            "hardware-probe" | "hardware_probe" | "probe" | "hw-probe" => Ok(Self::HardwareProbe),
+            other => Err(RuntimeBackendModeParseError(other.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("unknown runtime backend mode: {0}")]
+pub struct RuntimeBackendModeParseError(String);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SystemInfo {
     pub model: Model,
     pub board_family: BoardFamily,
+    pub backend: RuntimeBackendMode,
     pub firmware_version: String,
     pub active_slot: String,
     pub uptime_seconds: u64,

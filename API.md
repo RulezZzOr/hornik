@@ -17,7 +17,11 @@ Overview response:
 ```json
 {
   "schema_version": 1,
-  "system": {},
+  "system": {
+    "model": "s19j-pro",
+    "board_family": "xilinx",
+    "backend": "simulated"
+  },
   "health": {},
   "miner": {},
   "chains": [],
@@ -33,6 +37,10 @@ The overview endpoint is the primary dashboard read model. It combines the
 same redacted runtime state exposed by the narrower endpoints and does not
 include pool passwords, session tokens, private keys, or hidden contribution
 targets.
+
+`system.backend` is `simulated` by default. The optional `hardware-probe`
+backend is a read-only bring-up scaffold: it preserves the API contract, reports
+zero hashrate, marks hashboards as unprobed, and does not start mining.
 
 Hardware target catalog:
 
