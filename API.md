@@ -58,6 +58,35 @@ Support bundle response:
 Build `0.1.0` support bundles include only structured in-memory state and never
 include pool passwords, session tokens, private keys, or raw logs.
 
+## Updates
+
+- `GET /api/v1/update/status`
+
+Update status response:
+
+```json
+{
+  "update_model": "a_b",
+  "active_slot": "slot_a",
+  "inactive_slot": "slot_b",
+  "rollback_available": true,
+  "boot_once_pending": false,
+  "slots": [
+    {
+      "name": "slot_a",
+      "state": "active",
+      "bootable": true,
+      "version": "0.1.0",
+      "last_boot_successful": true
+    }
+  ],
+  "notes": []
+}
+```
+
+Build `0.1.0` exposes A/B status only. It does not write boot targets, install
+bundles, or reboot the device.
+
 ## Mining
 
 - `GET /api/v1/miner/status`

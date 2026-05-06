@@ -4,7 +4,7 @@ use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
     EventsResponse, HealthStatus, MinerStatus, Model, PoolConfig, PoolSummary, ProfilesResponse,
     RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
-    summarize_pools,
+    UpdateStatus, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -203,6 +203,10 @@ impl Supervisor {
             events: self.events(),
         }
     }
+
+    pub fn update_status(&self) -> UpdateStatus {
+        UpdateStatus::development_default(self.active_slot.clone(), env!("CARGO_PKG_VERSION"))
+    }
 }
 
 #[cfg(test)]
@@ -295,5 +299,21 @@ mod tests {
         assert!(bundle.privacy.pool_passwords_redacted);
         assert!(serialized.contains("\"password_set\":true"));
         assert!(!serialized.contains("super-secret"));
+    }
+
+    #[test]
+    fn update_status_exposes_ab_slots_without_mutation() {
+        let supervisor = Supervisor::with_config(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            RuntimeConfig::default(),
+        )
+        .unwrap();
+        let status = supervisor.update_status();
+
+        assert_eq!(status.update_model, "a_b");
+        assert_eq!(status.active_slot, "slot_a");
+        assert_eq!(status.inactive_slot, "slot_b");
+        assert!(!status.boot_once_pending);
     }
 }

@@ -7,6 +7,7 @@ pub mod pool;
 pub mod status;
 pub mod support;
 pub mod tuning;
+pub mod update;
 
 pub use board::{
     BoardFamily, BoardProfile, Capability, CapabilitySet, Model, SupportLevel, SupportedTarget,
@@ -32,3 +33,4 @@ pub use tuning::{
     ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningMode, TuningTargetType,
     profile_catalog,
 };
+pub use update::{SlotInfo, SlotState, UpdateStatus};
