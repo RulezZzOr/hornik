@@ -14,6 +14,7 @@ Build `0.1.0` is a safe development baseline:
 - Validated user pool config with redacted pool status API.
 - Validated tuning profile config with read-only profile API.
 - Deterministic in-memory event snapshot API.
+- WebSocket event snapshot and heartbeat API.
 - Redacted support bundle API.
 - Read-only A/B update status API.
 - Placeholder reproducible image artefact flow for `s19-xil`, `s19-bb`, and `s19-aml`.

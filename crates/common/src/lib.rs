@@ -19,7 +19,7 @@ pub use contribution::{
     ContributionStatus, ContributionWindow, DEFAULT_CONTRIBUTION_BENEFICIARY,
     MAX_CONTRIBUTION_RATE_PERCENT, MUTABLE_CONTRIBUTION_FIELDS, default_contribution_endpoints,
 };
-pub use event::{EventBuilder, EventRecord, EventSeverity, EventsResponse};
+pub use event::{EventBuilder, EventEnvelope, EventRecord, EventSeverity, EventsResponse};
 pub use manifest::{
     ArtifactManifest, ManifestError, ReleaseManifest, ReleaseSignature, VerificationReport,
     verify_manifest_file,

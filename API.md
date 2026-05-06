@@ -7,6 +7,7 @@ All public REST endpoints are versioned under `/api/v1`.
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
 - `GET /api/v1/events`
+- `GET /api/v1/ws`
 - `GET /api/v1/support/bundle`
 
 Events response:
@@ -32,6 +33,27 @@ Events response:
 
 Build `0.1.0` returns a deterministic in-memory event snapshot. Persistent
 SQLite-backed events come later.
+
+WebSocket endpoint:
+
+```text
+ws://<host>/api/v1/ws
+```
+
+On connect, the server sends the current event snapshot as event envelopes and
+then sends `system.heartbeat` messages. Build `0.1.0` does not yet stream
+database-backed live events.
+
+Envelope:
+
+```json
+{
+  "type": "boot.completed",
+  "seq": 1,
+  "uptime_seconds": 12,
+  "payload": {}
+}
+```
 
 Support bundle response:
 

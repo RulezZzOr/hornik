@@ -1,13 +1,22 @@
 use anyhow::Context;
-use axum::{Json, Router, extract::State, response::Html, routing::get};
+use axum::{
+    Json, Router,
+    extract::{
+        State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
+    response::{Html, IntoResponse},
+    routing::get,
+};
 use clap::Parser;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardFamily, ChainStatus, ContributionStatus, EventsResponse, MinerStatus, Model, PoolSummary,
-    ProfilesResponse, RuntimeConfig, SupportBundle, SystemInfo, UpdateStatus,
+    BoardFamily, ChainStatus, ContributionStatus, EventEnvelope, EventsResponse, MinerStatus,
+    Model, PoolSummary, ProfilesResponse, RuntimeConfig, SupportBundle, SystemInfo, UpdateStatus,
 };
 use openmineros_supervisor::Supervisor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use tokio::time;
 use tracing::info;
 
 #[derive(Debug, Parser)]
@@ -52,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/pools", get(pools))
         .route("/api/v1/profiles", get(profiles))
         .route("/api/v1/events", get(events))
+        .route("/api/v1/ws", get(ws_events))
         .route("/api/v1/support/bundle", get(support_bundle))
         .route("/api/v1/update/status", get(update_status))
         .route("/api/v1/contribution/status", get(contribution_status))
@@ -97,6 +107,44 @@ async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesRes
 
 async fn events(State(supervisor): State<Arc<Supervisor>>) -> Json<EventsResponse> {
     Json(supervisor.events())
+}
+
+async fn ws_events(
+    State(supervisor): State<Arc<Supervisor>>,
+    ws: WebSocketUpgrade,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| ws_event_stream(socket, supervisor))
+}
+
+async fn ws_event_stream(mut socket: WebSocket, supervisor: Arc<Supervisor>) {
+    for event in supervisor.events().events {
+        let envelope = EventEnvelope::from_record(event);
+        if send_ws_json(&mut socket, &envelope).await.is_err() {
+            return;
+        }
+    }
+
+    let mut interval = time::interval(Duration::from_secs(30));
+    loop {
+        interval.tick().await;
+        let heartbeat = EventEnvelope::heartbeat(supervisor.system_info().uptime_seconds);
+        if send_ws_json(&mut socket, &heartbeat).await.is_err() {
+            return;
+        }
+    }
+}
+
+async fn send_ws_json(
+    socket: &mut WebSocket,
+    value: &impl serde::Serialize,
+) -> Result<(), axum::Error> {
+    let message = match serde_json::to_string(value) {
+        Ok(message) => message,
+        Err(error) => {
+            return Err(axum::Error::new(error));
+        }
+    };
+    socket.send(Message::Text(message.into())).await
 }
 
 async fn support_bundle(State(supervisor): State<Arc<Supervisor>>) -> Json<SupportBundle> {

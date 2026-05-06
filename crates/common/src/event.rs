@@ -26,6 +26,37 @@ pub struct EventsResponse {
     pub events: Vec<EventRecord>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EventEnvelope {
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub seq: u64,
+    pub uptime_seconds: u64,
+    pub payload: Value,
+}
+
+impl EventEnvelope {
+    pub fn from_record(record: EventRecord) -> Self {
+        Self {
+            event_type: record.event_type.clone(),
+            seq: record.seq,
+            uptime_seconds: record.uptime_seconds,
+            payload: serde_json::to_value(record).expect("event record serialization cannot fail"),
+        }
+    }
+
+    pub fn heartbeat(uptime_seconds: u64) -> Self {
+        Self {
+            event_type: "system.heartbeat".to_string(),
+            seq: 0,
+            uptime_seconds,
+            payload: serde_json::json!({
+                "uptime_seconds": uptime_seconds,
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EventBuilder {
     next_seq: u64,
@@ -96,5 +127,23 @@ mod tests {
         assert_eq!(events[0].seq, 1);
         assert_eq!(events[1].seq, 2);
         assert_eq!(events[0].uptime_seconds, 42);
+    }
+
+    #[test]
+    fn envelope_uses_event_type_as_type_field() {
+        let record = EventRecord {
+            seq: 7,
+            uptime_seconds: 42,
+            severity: EventSeverity::Info,
+            event_type: "boot.completed".to_string(),
+            component: "supervisor".to_string(),
+            message: "boot completed".to_string(),
+            details: json!({}),
+        };
+
+        let envelope = EventEnvelope::from_record(record);
+        assert_eq!(envelope.event_type, "boot.completed");
+        assert_eq!(envelope.seq, 7);
+        assert_eq!(envelope.payload["event_type"], "boot.completed");
     }
 }
