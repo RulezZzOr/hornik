@@ -1,4 +1,6 @@
-use crate::{ContributionConfig, ContributionConfigError};
+use crate::{
+    ContributionConfig, ContributionConfigError, PoolConfig, PoolConfigError, validate_pools,
+};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 use thiserror::Error;
@@ -8,6 +10,8 @@ use thiserror::Error;
 pub struct RuntimeConfig {
     #[serde(default)]
     pub contribution: ContributionConfig,
+    #[serde(default)]
+    pub pools: Vec<PoolConfig>,
 }
 
 impl RuntimeConfig {
@@ -28,7 +32,8 @@ impl RuntimeConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.contribution
             .validate()
-            .map_err(ConfigError::Contribution)
+            .map_err(ConfigError::Contribution)?;
+        validate_pools(&self.pools).map_err(ConfigError::Pools)
     }
 }
 
@@ -40,6 +45,8 @@ pub enum ConfigError {
     Parse(#[source] toml::de::Error),
     #[error("invalid contribution config: {0}")]
     Contribution(#[source] ContributionConfigError),
+    #[error("invalid pool config: {0}")]
+    Pools(#[source] PoolConfigError),
 }
 
 #[cfg(test)]
@@ -53,6 +60,7 @@ mod tests {
 
         assert!(!config.contribution.enabled);
         assert_eq!(config.contribution.rate_percent, 0.0);
+        assert!(config.pools.is_empty());
     }
 
     #[test]
@@ -132,5 +140,59 @@ mod tests {
 
         assert_eq!(status.beneficiary, DEFAULT_CONTRIBUTION_BENEFICIARY);
         assert_eq!(status.endpoints, default_contribution_endpoints());
+    }
+
+    #[test]
+    fn parses_pool_config() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool.example:3333"
+            user = "acct.worker"
+            password = "x"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.pools.len(), 1);
+        assert_eq!(config.pools[0].priority, 0);
+    }
+
+    #[test]
+    fn rejects_duplicate_pool_priorities() {
+        let err = RuntimeConfig::from_toml_str(
+            r#"
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool-a.example:3333"
+            user = "acct.worker"
+
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool-b.example:3333"
+            user = "acct.worker"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ConfigError::Pools(_)));
+    }
+
+    #[test]
+    fn rejects_pool_password_leak_fields() {
+        let err = RuntimeConfig::from_toml_str(
+            r#"
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool.example:3333"
+            user = "acct.worker"
+            secret = "bad"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ConfigError::Parse(_)));
     }
 }

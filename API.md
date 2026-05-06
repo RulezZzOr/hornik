@@ -11,6 +11,30 @@ All public REST endpoints are versioned under `/api/v1`.
 
 - `GET /api/v1/miner/status`
 - `GET /api/v1/chains`
+- `GET /api/v1/pools`
+
+Pool responses are redacted. The API reports whether a password is set, but it
+does not return the password value.
+
+Example:
+
+```json
+{
+  "configured": 1,
+  "enabled": 1,
+  "active_priority": 0,
+  "pools": [
+    {
+      "priority": 0,
+      "url": "stratum+tcp://pool.example:3333",
+      "user": "account.worker",
+      "enabled": true,
+      "active": true,
+      "password_set": true
+    }
+  ]
+}
+```
 
 ## Contribution
 

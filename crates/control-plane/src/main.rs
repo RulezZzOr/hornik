@@ -3,7 +3,8 @@ use axum::{Json, Router, extract::State, response::Html, routing::get};
 use clap::Parser;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardFamily, ChainStatus, ContributionStatus, MinerStatus, Model, RuntimeConfig, SystemInfo,
+    BoardFamily, ChainStatus, ContributionStatus, MinerStatus, Model, PoolSummary, RuntimeConfig,
+    SystemInfo,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -48,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/system/health", get(system_health))
         .route("/api/v1/miner/status", get(miner_status))
         .route("/api/v1/chains", get(chains))
+        .route("/api/v1/pools", get(pools))
         .route("/api/v1/contribution/status", get(contribution_status))
         .route("/metrics", get(metrics))
         .with_state(supervisor);
@@ -79,6 +81,10 @@ async fn miner_status(State(supervisor): State<Arc<Supervisor>>) -> Json<MinerSt
 
 async fn chains(State(supervisor): State<Arc<Supervisor>>) -> Json<Vec<ChainStatus>> {
     Json(supervisor.chains())
+}
+
+async fn pools(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolSummary> {
+    Json(supervisor.pools())
 }
 
 async fn contribution_status(

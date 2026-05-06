@@ -57,3 +57,34 @@ beneficiary = "bc1qattacker"
 
 The official parser rejects this because `beneficiary` is not a mutable config
 field.
+
+## Pools
+
+User mining pools are configured with `[[pools]]`.
+
+```toml
+[[pools]]
+priority = 0
+url = "stratum+tcp://pool.example:3333"
+user = "account.worker"
+password = "x"
+enabled = true
+
+[[pools]]
+priority = 1
+url = "stratum+tcp://backup.example:3333"
+user = "account.worker"
+password = "x"
+enabled = true
+```
+
+Validation rules:
+
+- `priority` values must be unique,
+- `url` must start with `stratum+tcp://` or `stratum+ssl://`,
+- enabled pools must have a non-empty `user`,
+- unknown keys are rejected,
+- API output never returns pool passwords.
+
+Build `0.1.0` validates and exposes pool state, but does not connect to pools
+yet.

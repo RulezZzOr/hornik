@@ -2,6 +2,7 @@ pub mod board;
 pub mod config;
 pub mod contribution;
 pub mod manifest;
+pub mod pool;
 pub mod status;
 
 pub use board::{
@@ -17,5 +18,8 @@ pub use contribution::{
 pub use manifest::{
     ArtifactManifest, ManifestError, ReleaseManifest, ReleaseSignature, VerificationReport,
     verify_manifest_file,
+};
+pub use pool::{
+    PoolConfig, PoolConfigError, PoolInfo, PoolSummary, summarize_pools, validate_pools,
 };
 pub use status::{ChainStatus, HealthStatus, MinerMode, MinerStatus, Severity, SystemInfo};

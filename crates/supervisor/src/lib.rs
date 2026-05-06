@@ -2,7 +2,7 @@ use openmineros_asic_backend::{BackendError, SimulatedBackend};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, HealthStatus, MinerStatus,
-    Model, RuntimeConfig, Severity, SystemInfo,
+    Model, PoolConfig, PoolSummary, RuntimeConfig, Severity, SystemInfo, summarize_pools,
 };
 use std::time::Instant;
 
@@ -12,6 +12,7 @@ pub struct Supervisor {
     booted_at: Instant,
     active_slot: String,
     contribution: ContributionConfig,
+    pools: Vec<PoolConfig>,
 }
 
 impl Supervisor {
@@ -29,6 +30,7 @@ impl Supervisor {
             booted_at: Instant::now(),
             active_slot: "slot_a".to_string(),
             contribution: config.contribution,
+            pools: config.pools,
         })
     }
 
@@ -78,5 +80,9 @@ impl Supervisor {
 
     pub fn contribution_status(&self) -> ContributionStatus {
         ContributionStatus::from(self.contribution)
+    }
+
+    pub fn pools(&self) -> PoolSummary {
+        summarize_pools(&self.pools)
     }
 }

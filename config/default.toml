@@ -2,3 +2,11 @@
 enabled = false
 rate_percent = 0.0
 
+# Add user pools before real mining is enabled.
+#
+# [[pools]]
+# priority = 0
+# url = "stratum+tcp://pool.example:3333"
+# user = "account.worker"
+# password = "x"
+# enabled = true

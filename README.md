@@ -11,6 +11,7 @@ Build `0.1.0` is a safe development baseline:
 - S19-class model matrix with explicit support levels.
 - Simulated ASIC backend for local API and UI development.
 - REST endpoints for system info, health, miner status, chains, contribution status, and Prometheus metrics.
+- Validated user pool config with redacted pool status API.
 - Placeholder reproducible image artefact flow for `s19-xil`, `s19-bb`, and `s19-aml`.
 - Optional, transparent development contribution defaults to `0.0 %` and is capped at `3.0 %`.
 
@@ -54,6 +55,9 @@ They are intentionally not flashable firmware images.
 Build `0.1.0` includes a minimal TOML config parser. In official builds,
 contribution config can only change `enabled` and `rate_percent`; beneficiary
 and pool endpoint overrides are rejected.
+
+User mining pools are validated under `[[pools]]` and exposed through
+`GET /api/v1/pools` with passwords redacted.
 
 ## Development Contribution
 
