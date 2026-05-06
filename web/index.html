@@ -518,6 +518,23 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Tuning Plan</h2>
+                <span class="state" id="tuning-plan-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Guardrails</div>
+                  <div class="kv-value" id="tuning-guardrails">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Steps</div>
+                  <div class="kv-value" id="tuning-steps">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Update Slots</h2>
                 <span class="state" id="rollback">--</span>
               </div>
@@ -629,6 +646,7 @@
         renderPoolRuntime(overview.pool_runtime);
         renderSystem(overview);
         renderTuning(overview.profiles);
+        renderTuningPlan(overview.tuning_plan);
         renderSlots(overview.update);
         renderHardware(state.hardware);
         renderProbe(state.probe);
@@ -748,6 +766,21 @@
             .filter((profile) => profile.available)
             .map((profile) => profile.name)
             .join(", "),
+        );
+      }
+
+      function renderTuningPlan(plan) {
+        if (!plan) return;
+        text("tuning-plan-state", plan.state);
+        text(
+          "tuning-guardrails",
+          `${plan.guardrails.chip_frequency_step_mhz} MHz steps / ${plan.guardrails.voltage_step_mv} mV voltage trim / ${formatSeconds(plan.guardrails.min_step_duration_seconds)} min step`,
+        );
+        text(
+          "tuning-steps",
+          plan.steps
+            .map((step) => `${step.order}. ${step.phase}`)
+            .join(" -> "),
         );
       }
 

@@ -212,6 +212,7 @@ bundles, or reboot the device.
 - `GET /api/v1/chains`
 - `GET /api/v1/pools`
 - `GET /api/v1/profiles`
+- `GET /api/v1/tuning/plan`
 
 Pool responses are redacted. The API reports whether a password is set, but it
 does not return the password value.
@@ -290,6 +291,35 @@ Profiles response:
 Build `0.1.0` exposes profile state and validation only. It does not write
 frequency or voltage settings to hardware.
 
+Tuning plan response:
+
+```json
+{
+  "state": "planned_read_only",
+  "active_phase": "baseline",
+  "writable": false,
+  "guardrails": {
+    "chip_frequency_step_mhz": 5,
+    "voltage_step_mv": 5,
+    "min_step_duration_seconds": 300,
+    "max_chip_temp_c": 85.0,
+    "max_hw_error_rate_percent": 0.03,
+    "rollback_on_rejected_shares": true,
+    "voltage_trim_requires_stable_upclock": true
+  },
+  "steps": [
+    { "order": 1, "phase": "baseline", "scope": "chain" },
+    { "order": 2, "phase": "downclock_efficiency", "scope": "chip" },
+    { "order": 3, "phase": "upclock_stability", "scope": "chip" },
+    { "order": 4, "phase": "voltage_trim", "scope": "chip" }
+  ]
+}
+```
+
+Build `0.1.0` exposes this as a read-only plan. Future autotune must move
+slowly chip-by-chip, run downclock efficiency before upclock stability, and
+touch voltage only after stable frequency results.
+
 ## Contribution
 
 - `GET /api/v1/contribution/status`
@@ -350,6 +380,10 @@ omo_pool_reconnect_suppressed_total
 omo_pool_stale_jobs_total
 omo_tuning_profile_active{profile="stock_like"}
 omo_tuning_profile_available{profile="manual"}
+omo_tuning_plan_writable
+omo_tuning_frequency_step_mhz
+omo_tuning_voltage_step_mv
+omo_tuning_min_step_duration_seconds
 omo_update_rollback_available
 omo_update_boot_once_pending
 omo_update_slot_bootable{slot="slot_a",state="active"}

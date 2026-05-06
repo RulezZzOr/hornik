@@ -1,6 +1,7 @@
 use crate::{
     ChainStatus, ContributionStatus, EventsResponse, HealthStatusResponse, MinerStatus,
-    PoolRuntimeSummary, PoolSummary, ProfilesResponse, SystemInfo, UpdateStatus,
+    PoolRuntimeSummary, PoolSummary, ProfilesResponse, SystemInfo, TuningPlanResponse,
+    UpdateStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,7 @@ pub struct DashboardOverview {
     pub pools: PoolSummary,
     pub pool_runtime: PoolRuntimeSummary,
     pub profiles: ProfilesResponse,
+    pub tuning_plan: TuningPlanResponse,
     pub contribution: ContributionStatus,
     pub update: UpdateStatus,
     pub events: EventsResponse,

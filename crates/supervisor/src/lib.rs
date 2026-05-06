@@ -5,7 +5,7 @@ use openmineros_common::{
     EventsResponse, HardwareProbeReport, HealthStatus, MinerStatus, Model, PoolConfig,
     PoolConnectionPolicy, PoolRuntimeSummary, PoolSummary, ProfilesResponse, RuntimeBackendMode,
     RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
-    UpdateStatus, summarize_pool_runtime, summarize_pools,
+    TuningPlanResponse, UpdateStatus, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -127,6 +127,10 @@ impl Supervisor {
         ProfilesResponse::from(self.tuning)
     }
 
+    pub fn tuning_plan(&self) -> TuningPlanResponse {
+        TuningPlanResponse::from(self.tuning)
+    }
+
     pub fn events(&self) -> EventsResponse {
         let mut events = EventBuilder::new(self.uptime_seconds());
         let system_info = self.system_info();
@@ -135,6 +139,7 @@ impl Supervisor {
         let pool_runtime = self.pool_runtime();
         let contribution = self.contribution_status();
         let profiles = self.profiles();
+        let tuning_plan = self.tuning_plan();
 
         events.push(
             EventSeverity::Info,
@@ -163,6 +168,8 @@ impl Supervisor {
                 "job_processing_budget_ms": pool_runtime.policy.job_processing_budget_ms,
                 "reconnect_min_interval_seconds": pool_runtime.policy.reconnect_min_interval_seconds,
                 "tuning_mode": profiles.active,
+                "tuning_plan_state": tuning_plan.state,
+                "tuning_writable": tuning_plan.writable,
                 "backend": system_info.backend,
                 "contribution_enabled": contribution.enabled,
                 "contribution_rate_percent": contribution.rate_percent,
@@ -182,6 +189,22 @@ impl Supervisor {
                 }),
             );
         }
+
+        events.push(
+            EventSeverity::Info,
+            "tuning.plan_loaded",
+            "tuning",
+            "slow chip-by-chip tuning plan loaded",
+            json!({
+                "state": tuning_plan.state,
+                "active_phase": tuning_plan.active_phase,
+                "writable": tuning_plan.writable,
+                "voltage_trim_last": tuning_plan.steps.last().map(|step| step.phase),
+                "frequency_step_mhz": tuning_plan.guardrails.chip_frequency_step_mhz,
+                "voltage_step_mv": tuning_plan.guardrails.voltage_step_mv,
+                "min_step_duration_seconds": tuning_plan.guardrails.min_step_duration_seconds,
+            }),
+        );
 
         events.push(
             EventSeverity::Info,
@@ -250,6 +273,7 @@ impl Supervisor {
             pools: self.pools(),
             pool_runtime: self.pool_runtime(),
             profiles: self.profiles(),
+            tuning_plan: self.tuning_plan(),
             contribution: self.contribution_status(),
             events: self.events(),
         }
@@ -269,6 +293,7 @@ impl Supervisor {
             pools: self.pools(),
             pool_runtime: self.pool_runtime(),
             profiles: self.profiles(),
+            tuning_plan: self.tuning_plan(),
             contribution: self.contribution_status(),
             update: self.update_status(),
             events: self.events(),
@@ -283,6 +308,7 @@ impl Supervisor {
         let pools = self.pools();
         let pool_runtime = self.pool_runtime();
         let profiles = self.profiles();
+        let tuning_plan = self.tuning_plan();
         let update = self.update_status();
         let mut output = String::new();
 
@@ -400,6 +426,26 @@ impl Supervisor {
                 bool_value(profile.available),
             );
         }
+        metric(
+            &mut output,
+            "omo_tuning_plan_writable",
+            bool_value(tuning_plan.writable),
+        );
+        metric(
+            &mut output,
+            "omo_tuning_frequency_step_mhz",
+            tuning_plan.guardrails.chip_frequency_step_mhz,
+        );
+        metric(
+            &mut output,
+            "omo_tuning_voltage_step_mv",
+            tuning_plan.guardrails.voltage_step_mv,
+        );
+        metric(
+            &mut output,
+            "omo_tuning_min_step_duration_seconds",
+            tuning_plan.guardrails.min_step_duration_seconds,
+        );
 
         metric(
             &mut output,
@@ -785,6 +831,32 @@ mod tests {
         assert!(metrics.contains("omo_pool_latency_warning_ms 250"));
         assert!(metrics.contains("omo_pool_job_processing_budget_ms 25"));
         assert!(!metrics.contains("super-secret"));
+    }
+
+    #[test]
+    fn tuning_plan_is_read_only_and_voltage_trim_last() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [tuning]
+            mode = "balanced"
+            autotune = true
+            "#,
+        )
+        .unwrap();
+        let supervisor =
+            Supervisor::with_config(Model::S19jPro, BoardFamily::Xilinx, config).unwrap();
+        let overview = supervisor.dashboard_overview();
+        let metrics = supervisor.prometheus_metrics();
+
+        assert!(!overview.tuning_plan.writable);
+        assert_eq!(
+            overview.tuning_plan.steps.last().unwrap().phase,
+            openmineros_common::TuningPhase::VoltageTrim
+        );
+        assert!(overview.tuning_plan.guardrails.rollback_on_rejected_shares);
+        assert!(metrics.contains("omo_tuning_plan_writable 0"));
+        assert!(metrics.contains("omo_tuning_frequency_step_mhz 5"));
+        assert!(metrics.contains("omo_tuning_voltage_step_mv 5"));
     }
 
     #[test]

@@ -14,6 +14,7 @@ Build `0.1.0` is a safe development baseline:
 - Validated user pool config with redacted pool status API.
 - Pool latency, job processing, and reconnect policy surfaced for the future stratum engine.
 - Validated tuning profile config with read-only profile API.
+- Read-only autotune plan: baseline, downclock efficiency, upclock stability, then voltage trim.
 - Deterministic in-memory event snapshot API.
 - WebSocket event snapshot and heartbeat API.
 - Redacted support bundle API.

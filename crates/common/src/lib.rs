@@ -38,7 +38,8 @@ pub use status::{
 };
 pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{
-    ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningMode, TuningTargetType,
-    profile_catalog,
+    ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningGuardrails, TuningMode,
+    TuningPhase, TuningPlanResponse, TuningPlanState, TuningStep, TuningTargetType,
+    profile_catalog, tuning_plan_steps,
 };
 pub use update::{SlotInfo, SlotState, UpdateStatus};

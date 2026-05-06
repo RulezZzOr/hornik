@@ -160,6 +160,16 @@ Supported modes:
 `manual` is part of the API catalog but rejected by config validation in build
 `0.1.0`, because safe frequency and voltage bounds are not implemented yet.
 
+Autotune planning is intentionally conservative. The public plan order is:
+
+1. baseline stock-like stability,
+2. downclock efficiency test,
+3. slow chip-by-chip upclock stability test,
+4. voltage trim last, only after stable frequency results.
+
+Build `0.1.0` exposes this plan through API/UI only. It does not write clocks
+or voltages.
+
 Validation rules:
 
 - `target_value`, when present, must be positive and finite,

@@ -13,7 +13,8 @@ use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
     HardwareProbeReport, MinerStatus, Model, PoolSummary, ProfilesResponse, RuntimeBackendMode,
-    RuntimeConfig, SupportBundle, SystemInfo, TargetCatalog, UpdateStatus, target_catalog,
+    RuntimeConfig, SupportBundle, SystemInfo, TargetCatalog, TuningPlanResponse, UpdateStatus,
+    target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -71,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/chains", get(chains))
         .route("/api/v1/pools", get(pools))
         .route("/api/v1/profiles", get(profiles))
+        .route("/api/v1/tuning/plan", get(tuning_plan))
         .route("/api/v1/events", get(events))
         .route("/api/v1/ws", get(ws_events))
         .route("/api/v1/support/bundle", get(support_bundle))
@@ -126,6 +128,10 @@ async fn pools(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolSummary> {
 
 async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesResponse> {
     Json(supervisor.profiles())
+}
+
+async fn tuning_plan(State(supervisor): State<Arc<Supervisor>>) -> Json<TuningPlanResponse> {
+    Json(supervisor.tuning_plan())
 }
 
 async fn events(State(supervisor): State<Arc<Supervisor>>) -> Json<EventsResponse> {
