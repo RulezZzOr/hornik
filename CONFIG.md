@@ -94,6 +94,11 @@ Validation rules:
 Build `0.1.0` validates and exposes pool state, but does not connect to pools
 yet.
 
+Pool configuration affects event output:
+
+- no enabled pools emits `pool.unconfigured`,
+- at least one enabled pool emits `pool.active_selected`.
+
 ## Tuning
 
 Tuning config selects the active high-level profile.

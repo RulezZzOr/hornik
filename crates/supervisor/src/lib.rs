@@ -1,10 +1,11 @@
 use openmineros_asic_backend::{BackendError, SimulatedBackend};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, HealthStatus, MinerStatus,
-    Model, PoolConfig, PoolSummary, ProfilesResponse, RuntimeConfig, Severity, SystemInfo,
-    TuningConfig, summarize_pools,
+    BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
+    EventsResponse, HealthStatus, MinerStatus, Model, PoolConfig, PoolSummary, ProfilesResponse,
+    RuntimeConfig, Severity, SystemInfo, TuningConfig, summarize_pools,
 };
+use serde_json::json;
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
@@ -43,10 +44,14 @@ impl Supervisor {
             board_family: self.backend.profile().family,
             firmware_version: env!("CARGO_PKG_VERSION").to_string(),
             active_slot: self.active_slot.clone(),
-            uptime_seconds: self.booted_at.elapsed().as_secs(),
+            uptime_seconds: self.uptime_seconds(),
             serial: None,
             capabilities: self.backend.profile().capabilities.clone(),
         }
+    }
+
+    fn uptime_seconds(&self) -> u64 {
+        self.booted_at.elapsed().as_secs()
     }
 
     pub fn health(&self) -> HealthStatusResponse {
@@ -93,5 +98,161 @@ impl Supervisor {
 
     pub fn profiles(&self) -> ProfilesResponse {
         ProfilesResponse::from(self.tuning)
+    }
+
+    pub fn events(&self) -> EventsResponse {
+        let mut events = EventBuilder::new(self.uptime_seconds());
+        let system_info = self.system_info();
+        let health = self.health();
+        let pools = self.pools();
+        let contribution = self.contribution_status();
+        let profiles = self.profiles();
+
+        events.push(
+            EventSeverity::Info,
+            "boot.completed",
+            "supervisor",
+            "supervisor initialized",
+            json!({
+                "model": system_info.model,
+                "board_family": system_info.board_family,
+                "firmware_version": system_info.firmware_version,
+                "active_slot": system_info.active_slot,
+            }),
+        );
+
+        events.push(
+            EventSeverity::Info,
+            "config.loaded",
+            "config",
+            "runtime config loaded",
+            json!({
+                "pool_count": pools.configured,
+                "enabled_pool_count": pools.enabled,
+                "tuning_mode": profiles.active,
+                "contribution_enabled": contribution.enabled,
+                "contribution_rate_percent": contribution.rate_percent,
+            }),
+        );
+
+        events.push(
+            EventSeverity::Info,
+            "contribution.target_locked",
+            "contribution",
+            "official contribution target is locked",
+            json!({
+                "target_locked": contribution.target_locked,
+                "mutable_fields": contribution.mutable_fields,
+                "beneficiary": contribution.beneficiary,
+            }),
+        );
+
+        if pools.enabled == 0 {
+            events.push(
+                EventSeverity::Warn,
+                "pool.unconfigured",
+                "pool",
+                "no enabled user pool is configured",
+                json!({
+                    "configured": pools.configured,
+                    "enabled": pools.enabled,
+                }),
+            );
+        } else {
+            events.push(
+                EventSeverity::Info,
+                "pool.active_selected",
+                "pool",
+                "active pool selected by priority",
+                json!({
+                    "active_priority": pools.active_priority,
+                    "enabled": pools.enabled,
+                }),
+            );
+        }
+
+        for issue in health.issues {
+            events.push(
+                EventSeverity::Warn,
+                "system.health_issue",
+                "supervisor",
+                issue,
+                json!({
+                    "state": health.state,
+                    "severity": health.severity,
+                }),
+            );
+        }
+
+        events.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openmineros_common::{TuningMode, TuningTargetType};
+
+    #[test]
+    fn emits_pool_unconfigured_event_without_pools() {
+        let supervisor = Supervisor::with_config(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            RuntimeConfig::default(),
+        )
+        .unwrap();
+        let events = supervisor.events();
+
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "pool.unconfigured")
+        );
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "contribution.target_locked")
+        );
+    }
+
+    #[test]
+    fn emits_active_pool_event_when_pool_is_enabled() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [tuning]
+            mode = "eco"
+            target_type = "watts"
+            target_value = 2800
+
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool.example:3333"
+            user = "acct.worker"
+            password = "x"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.tuning.mode, TuningMode::Eco);
+        assert_eq!(config.tuning.target_type, TuningTargetType::Watts);
+
+        let supervisor =
+            Supervisor::with_config(Model::S19jPro, BoardFamily::Xilinx, config).unwrap();
+        let events = supervisor.events();
+
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "pool.active_selected")
+        );
+        assert!(
+            !events
+                .events
+                .iter()
+                .any(|event| event.event_type == "pool.unconfigured")
+        );
     }
 }

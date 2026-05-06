@@ -13,6 +13,7 @@ Build `0.1.0` is a safe development baseline:
 - REST endpoints for system info, health, miner status, chains, contribution status, and Prometheus metrics.
 - Validated user pool config with redacted pool status API.
 - Validated tuning profile config with read-only profile API.
+- Deterministic in-memory event snapshot API.
 - Placeholder reproducible image artefact flow for `s19-xil`, `s19-bb`, and `s19-aml`.
 - Optional, transparent development contribution defaults to `0.0 %` and is capped at `3.0 %`.
 

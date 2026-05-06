@@ -6,6 +6,31 @@ All public REST endpoints are versioned under `/api/v1`.
 
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
+- `GET /api/v1/events`
+
+Events response:
+
+```json
+{
+  "events": [
+    {
+      "seq": 1,
+      "uptime_seconds": 12,
+      "severity": "info",
+      "event_type": "boot.completed",
+      "component": "supervisor",
+      "message": "supervisor initialized",
+      "details": {
+        "model": "s19j-pro",
+        "board_family": "xilinx"
+      }
+    }
+  ]
+}
+```
+
+Build `0.1.0` returns a deterministic in-memory event snapshot. Persistent
+SQLite-backed events come later.
 
 ## Mining
 

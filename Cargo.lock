@@ -554,6 +554,7 @@ dependencies = [
  "openmineros-asic-backend",
  "openmineros-common",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

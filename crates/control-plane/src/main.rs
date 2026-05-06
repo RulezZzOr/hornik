@@ -3,7 +3,7 @@ use axum::{Json, Router, extract::State, response::Html, routing::get};
 use clap::Parser;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardFamily, ChainStatus, ContributionStatus, MinerStatus, Model, PoolSummary,
+    BoardFamily, ChainStatus, ContributionStatus, EventsResponse, MinerStatus, Model, PoolSummary,
     ProfilesResponse, RuntimeConfig, SystemInfo,
 };
 use openmineros_supervisor::Supervisor;
@@ -51,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/chains", get(chains))
         .route("/api/v1/pools", get(pools))
         .route("/api/v1/profiles", get(profiles))
+        .route("/api/v1/events", get(events))
         .route("/api/v1/contribution/status", get(contribution_status))
         .route("/metrics", get(metrics))
         .with_state(supervisor);
@@ -90,6 +91,10 @@ async fn pools(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolSummary> {
 
 async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesResponse> {
     Json(supervisor.profiles())
+}
+
+async fn events(State(supervisor): State<Arc<Supervisor>>) -> Json<EventsResponse> {
+    Json(supervisor.events())
 }
 
 async fn contribution_status(
