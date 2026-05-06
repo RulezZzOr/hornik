@@ -12,6 +12,7 @@ Build `0.1.0` is a safe development baseline:
 - Simulated ASIC backend for local API and UI development.
 - REST endpoints for system info, health, miner status, chains, contribution status, and Prometheus metrics.
 - Validated user pool config with redacted pool status API.
+- Validated tuning profile config with read-only profile API.
 - Placeholder reproducible image artefact flow for `s19-xil`, `s19-bb`, and `s19-aml`.
 - Optional, transparent development contribution defaults to `0.0 %` and is capped at `3.0 %`.
 
@@ -58,6 +59,10 @@ and pool endpoint overrides are rejected.
 
 User mining pools are validated under `[[pools]]` and exposed through
 `GET /api/v1/pools` with passwords redacted.
+
+Tuning profiles are validated under `[tuning]` and exposed through
+`GET /api/v1/profiles`. Build `0.1.0` does not touch hardware clocks or
+voltages.
 
 ## Development Contribution
 

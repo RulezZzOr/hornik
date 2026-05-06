@@ -1,8 +1,8 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use openmineros_common::{
-    BoardFamily, ContributionStatus, Model, RuntimeConfig, SupportLevel, summarize_pools,
-    supported_targets, verify_manifest_file,
+    BoardFamily, ContributionStatus, Model, ProfilesResponse, RuntimeConfig, SupportLevel,
+    summarize_pools, supported_targets, verify_manifest_file,
 };
 use std::path::PathBuf;
 
@@ -108,6 +108,7 @@ fn main() -> anyhow::Result<()> {
                         "beneficiary": contribution.beneficiary,
                         "endpoints": contribution.endpoints,
                     },
+                    "tuning": ProfilesResponse::from(config.tuning),
                     "pools": summarize_pools(&config.pools),
                 }))?
             );

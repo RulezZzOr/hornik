@@ -12,6 +12,7 @@ All public REST endpoints are versioned under `/api/v1`.
 - `GET /api/v1/miner/status`
 - `GET /api/v1/chains`
 - `GET /api/v1/pools`
+- `GET /api/v1/profiles`
 
 Pool responses are redacted. The API reports whether a password is set, but it
 does not return the password value.
@@ -35,6 +36,32 @@ Example:
   ]
 }
 ```
+
+Profiles response:
+
+```json
+{
+  "active": "stock_like",
+  "target_type": "watts",
+  "target_value": null,
+  "autotune": false,
+  "profiles": [
+    {
+      "name": "stock_like",
+      "available": true,
+      "reason": null
+    },
+    {
+      "name": "manual",
+      "available": false,
+      "reason": "manual tuning is disabled in build 0.1.0"
+    }
+  ]
+}
+```
+
+Build `0.1.0` exposes profile state and validation only. It does not write
+frequency or voltage settings to hardware.
 
 ## Contribution
 

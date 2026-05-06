@@ -8,6 +8,11 @@ Default config:
 [contribution]
 enabled = false
 rate_percent = 0.0
+
+[tuning]
+mode = "stock_like"
+target_type = "watts"
+autotune = false
 ```
 
 Validate a config file:
@@ -88,3 +93,32 @@ Validation rules:
 
 Build `0.1.0` validates and exposes pool state, but does not connect to pools
 yet.
+
+## Tuning
+
+Tuning config selects the active high-level profile.
+
+```toml
+[tuning]
+mode = "stock_like"
+target_type = "watts"
+target_value = 3000
+autotune = false
+```
+
+Supported modes:
+
+- `stock_like`
+- `eco`
+- `balanced`
+- `performance`
+- `safe_mode`
+
+`manual` is part of the API catalog but rejected by config validation in build
+`0.1.0`, because safe frequency and voltage bounds are not implemented yet.
+
+Validation rules:
+
+- `target_value`, when present, must be positive and finite,
+- `autotune = true` is rejected with `safe_mode`,
+- `manual` is rejected in build `0.1.0`.

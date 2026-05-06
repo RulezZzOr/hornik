@@ -2,6 +2,11 @@
 enabled = false
 rate_percent = 0.0
 
+[tuning]
+mode = "stock_like"
+target_type = "watts"
+autotune = false
+
 # Add user pools before real mining is enabled.
 #
 # [[pools]]

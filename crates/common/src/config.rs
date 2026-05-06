@@ -1,5 +1,6 @@
 use crate::{
-    ContributionConfig, ContributionConfigError, PoolConfig, PoolConfigError, validate_pools,
+    ContributionConfig, ContributionConfigError, PoolConfig, PoolConfigError, TuningConfig,
+    TuningConfigError, validate_pools,
 };
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
@@ -10,6 +11,8 @@ use thiserror::Error;
 pub struct RuntimeConfig {
     #[serde(default)]
     pub contribution: ContributionConfig,
+    #[serde(default)]
+    pub tuning: TuningConfig,
     #[serde(default)]
     pub pools: Vec<PoolConfig>,
 }
@@ -33,6 +36,7 @@ impl RuntimeConfig {
         self.contribution
             .validate()
             .map_err(ConfigError::Contribution)?;
+        self.tuning.validate().map_err(ConfigError::Tuning)?;
         validate_pools(&self.pools).map_err(ConfigError::Pools)
     }
 }
@@ -45,6 +49,8 @@ pub enum ConfigError {
     Parse(#[source] toml::de::Error),
     #[error("invalid contribution config: {0}")]
     Contribution(#[source] ContributionConfigError),
+    #[error("invalid tuning config: {0}")]
+    Tuning(#[source] TuningConfigError),
     #[error("invalid pool config: {0}")]
     Pools(#[source] PoolConfigError),
 }
@@ -60,6 +66,7 @@ mod tests {
 
         assert!(!config.contribution.enabled);
         assert_eq!(config.contribution.rate_percent, 0.0);
+        assert_eq!(config.tuning.mode, crate::TuningMode::StockLike);
         assert!(config.pools.is_empty());
     }
 
@@ -158,6 +165,36 @@ mod tests {
 
         assert_eq!(config.pools.len(), 1);
         assert_eq!(config.pools[0].priority, 0);
+    }
+
+    #[test]
+    fn parses_tuning_config() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [tuning]
+            mode = "eco"
+            target_type = "watts"
+            target_value = 2800
+            autotune = false
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.tuning.mode, crate::TuningMode::Eco);
+        assert_eq!(config.tuning.target_value, Some(2800.0));
+    }
+
+    #[test]
+    fn rejects_manual_tuning_in_mvp() {
+        let err = RuntimeConfig::from_toml_str(
+            r#"
+            [tuning]
+            mode = "manual"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ConfigError::Tuning(_)));
     }
 
     #[test]

@@ -4,6 +4,7 @@ pub mod contribution;
 pub mod manifest;
 pub mod pool;
 pub mod status;
+pub mod tuning;
 
 pub use board::{
     BoardFamily, BoardProfile, Capability, CapabilitySet, Model, SupportLevel, SupportedTarget,
@@ -23,3 +24,7 @@ pub use pool::{
     PoolConfig, PoolConfigError, PoolInfo, PoolSummary, summarize_pools, validate_pools,
 };
 pub use status::{ChainStatus, HealthStatus, MinerMode, MinerStatus, Severity, SystemInfo};
+pub use tuning::{
+    ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningMode, TuningTargetType,
+    profile_catalog,
+};
