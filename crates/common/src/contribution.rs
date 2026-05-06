@@ -13,6 +13,7 @@ pub struct ContributionEndpoint {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContributionConfig {
     pub enabled: bool,
     pub rate_percent: f64,
@@ -28,6 +29,17 @@ impl Default for ContributionConfig {
 }
 
 impl ContributionConfig {
+    pub fn validate(self) -> Result<(), ContributionConfigError> {
+        if !(0.0..=MAX_CONTRIBUTION_RATE_PERCENT).contains(&self.rate_percent) {
+            return Err(ContributionConfigError::RateOutOfRange {
+                rate_percent: self.rate_percent,
+                max_rate_percent: MAX_CONTRIBUTION_RATE_PERCENT,
+            });
+        }
+
+        Ok(())
+    }
+
     pub fn scheduled_seconds_per_day(self) -> u32 {
         if !self.enabled {
             return 0;
@@ -36,6 +48,15 @@ impl ContributionConfig {
         let clamped = self.rate_percent.clamp(0.0, MAX_CONTRIBUTION_RATE_PERCENT);
         ((24.0 * 60.0 * 60.0) * (clamped / 100.0)).round() as u32
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum ContributionConfigError {
+    #[error("contribution rate {rate_percent} is outside allowed range 0.0..={max_rate_percent}")]
+    RateOutOfRange {
+        rate_percent: f64,
+        max_rate_percent: f64,
+    },
 }
 
 pub fn default_contribution_endpoints() -> Vec<ContributionEndpoint> {
@@ -130,6 +151,19 @@ mod tests {
 
         assert_eq!(config.scheduled_seconds_per_day(), 2592);
         assert_eq!(ContributionStatus::from(config).rate_percent, 3.0);
+    }
+
+    #[test]
+    fn contribution_config_rejects_rates_outside_official_range() {
+        let config = ContributionConfig {
+            enabled: true,
+            rate_percent: 3.1,
+        };
+
+        assert!(matches!(
+            config.validate(),
+            Err(ContributionConfigError::RateOutOfRange { .. })
+        ));
     }
 
     #[test]

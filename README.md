@@ -21,6 +21,7 @@ This build does **not** flash hardware or ship low-level ASIC drivers yet.
 ```bash
 make test
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro
+cargo run -p openmineros-commander -- validate-config --config config/default.toml
 ```
 
 Open `http://127.0.0.1:8080` for the local status UI.
@@ -47,6 +48,12 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/chains`
 - `GET /api/v1/contribution/status`
 - `GET /metrics`
+
+## Config
+
+Build `0.1.0` includes a minimal TOML config parser. In official builds,
+contribution config can only change `enabled` and `rate_percent`; beneficiary
+and pool endpoint overrides are rejected.
 
 ## Development Contribution
 

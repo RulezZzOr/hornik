@@ -1,7 +1,8 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use openmineros_common::{
-    BoardFamily, Model, SupportLevel, supported_targets, verify_manifest_file,
+    BoardFamily, ContributionStatus, Model, RuntimeConfig, SupportLevel, supported_targets,
+    verify_manifest_file,
 };
 use std::path::PathBuf;
 
@@ -33,6 +34,10 @@ enum Command {
         artifact_dir: Option<PathBuf>,
         #[arg(long)]
         allow_flashable_unsigned: bool,
+    },
+    ValidateConfig {
+        #[arg(long)]
+        config: PathBuf,
     },
 }
 
@@ -86,6 +91,25 @@ fn main() -> anyhow::Result<()> {
             let report = verify_manifest_file(&manifest, artifact_dir, allow_flashable_unsigned)?;
 
             println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::ValidateConfig { config } => {
+            let config = RuntimeConfig::from_file(config)?;
+            let contribution = ContributionStatus::from(config.contribution);
+
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "valid": true,
+                    "contribution": {
+                        "enabled": contribution.enabled,
+                        "rate_percent": contribution.rate_percent,
+                        "target_locked": contribution.target_locked,
+                        "mutable_fields": contribution.mutable_fields,
+                        "beneficiary": contribution.beneficiary,
+                        "endpoints": contribution.endpoints,
+                    }
+                }))?
+            );
         }
     }
 

@@ -2,7 +2,7 @@ use openmineros_asic_backend::{BackendError, SimulatedBackend};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, HealthStatus, MinerStatus,
-    Model, Severity, SystemInfo,
+    Model, RuntimeConfig, Severity, SystemInfo,
 };
 use std::time::Instant;
 
@@ -16,11 +16,19 @@ pub struct Supervisor {
 
 impl Supervisor {
     pub fn new(model: Model, board: BoardFamily) -> Result<Self, BackendError> {
+        Self::with_config(model, board, RuntimeConfig::default())
+    }
+
+    pub fn with_config(
+        model: Model,
+        board: BoardFamily,
+        config: RuntimeConfig,
+    ) -> Result<Self, BackendError> {
         Ok(Self {
             backend: SimulatedBackend::new(model, board)?,
             booted_at: Instant::now(),
             active_slot: "slot_a".to_string(),
-            contribution: ContributionConfig::default(),
+            contribution: config.contribution,
         })
     }
 

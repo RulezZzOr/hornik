@@ -3,10 +3,10 @@ use axum::{Json, Router, extract::State, response::Html, routing::get};
 use clap::Parser;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardFamily, ChainStatus, ContributionStatus, MinerStatus, Model, SystemInfo,
+    BoardFamily, ChainStatus, ContributionStatus, MinerStatus, Model, RuntimeConfig, SystemInfo,
 };
 use openmineros_supervisor::Supervisor;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use tracing::info;
 
 #[derive(Debug, Parser)]
@@ -19,6 +19,8 @@ struct Cli {
     model: String,
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: SocketAddr,
+    #[arg(long)]
+    config: Option<PathBuf>,
 }
 
 #[tokio::main]
@@ -33,7 +35,12 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let board: BoardFamily = cli.board.parse().context("invalid board")?;
     let model: Model = cli.model.parse().context("invalid model")?;
-    let supervisor = Arc::new(Supervisor::new(model, board)?);
+    let config = match cli.config {
+        Some(path) => RuntimeConfig::from_file(&path)
+            .with_context(|| format!("invalid config {}", path.display()))?,
+        None => RuntimeConfig::default(),
+    };
+    let supervisor = Arc::new(Supervisor::with_config(model, board, config)?);
 
     let app = Router::new()
         .route("/", get(index))

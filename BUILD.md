@@ -16,6 +16,7 @@ make fmt
 make clippy
 make test
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro
+cargo run -p openmineros-commander -- validate-config --config config/default.toml
 make image BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- verify-manifest \

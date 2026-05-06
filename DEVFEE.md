@@ -43,6 +43,9 @@ official build. A fork can change source code because this is GPL open source,
 but it must publish those changes and it will not match official signed release
 artefacts.
 
+The config parser uses a closed schema. Adding keys such as `beneficiary`,
+`endpoint`, or `endpoints` under `[contribution]` is rejected.
+
 ## Prohibited Behavior
 
 - hidden wallet addresses,
