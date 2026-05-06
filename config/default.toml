@@ -7,6 +7,13 @@ mode = "stock_like"
 target_type = "watts"
 autotune = false
 
+[pool_policy]
+latency_warning_ms = 500
+job_processing_budget_ms = 50
+reconnect_min_interval_seconds = 15
+failover_cooldown_seconds = 60
+keepalive_interval_seconds = 30
+
 # Add user pools before real mining is enabled.
 #
 # [[pools]]

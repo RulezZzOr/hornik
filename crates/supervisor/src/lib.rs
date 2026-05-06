@@ -2,9 +2,10 @@ use openmineros_asic_backend::{BackendError, BackendHandle};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
-    EventsResponse, HardwareProbeReport, HealthStatus, MinerStatus, Model, PoolConfig, PoolSummary,
-    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, SupportBundle,
-    SupportBundlePrivacy, SystemInfo, TuningConfig, UpdateStatus, summarize_pools,
+    EventsResponse, HardwareProbeReport, HealthStatus, MinerStatus, Model, PoolConfig,
+    PoolConnectionPolicy, PoolRuntimeSummary, PoolSummary, ProfilesResponse, RuntimeBackendMode,
+    RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
+    UpdateStatus, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -17,6 +18,7 @@ pub struct Supervisor {
     contribution: ContributionConfig,
     tuning: TuningConfig,
     pools: Vec<PoolConfig>,
+    pool_policy: PoolConnectionPolicy,
 }
 
 impl Supervisor {
@@ -45,6 +47,7 @@ impl Supervisor {
             contribution: config.contribution,
             tuning: config.tuning,
             pools: config.pools,
+            pool_policy: config.pool_policy,
         })
     }
 
@@ -116,6 +119,10 @@ impl Supervisor {
         summarize_pools(&self.pools)
     }
 
+    pub fn pool_runtime(&self) -> PoolRuntimeSummary {
+        summarize_pool_runtime(&self.pools, self.pool_policy)
+    }
+
     pub fn profiles(&self) -> ProfilesResponse {
         ProfilesResponse::from(self.tuning)
     }
@@ -125,6 +132,7 @@ impl Supervisor {
         let system_info = self.system_info();
         let health = self.health();
         let pools = self.pools();
+        let pool_runtime = self.pool_runtime();
         let contribution = self.contribution_status();
         let profiles = self.profiles();
 
@@ -150,6 +158,10 @@ impl Supervisor {
             json!({
                 "pool_count": pools.configured,
                 "enabled_pool_count": pools.enabled,
+                "pool_runtime_state": pool_runtime.state,
+                "latency_warning_ms": pool_runtime.policy.latency_warning_ms,
+                "job_processing_budget_ms": pool_runtime.policy.job_processing_budget_ms,
+                "reconnect_min_interval_seconds": pool_runtime.policy.reconnect_min_interval_seconds,
                 "tuning_mode": profiles.active,
                 "backend": system_info.backend,
                 "contribution_enabled": contribution.enabled,
@@ -203,6 +215,9 @@ impl Supervisor {
                 json!({
                     "active_priority": pools.active_priority,
                     "enabled": pools.enabled,
+                    "latency_warning_ms": pool_runtime.policy.latency_warning_ms,
+                    "job_processing_budget_ms": pool_runtime.policy.job_processing_budget_ms,
+                    "reconnect_min_interval_seconds": pool_runtime.policy.reconnect_min_interval_seconds,
                 }),
             );
         }
@@ -233,6 +248,7 @@ impl Supervisor {
             miner: self.miner_status(),
             chains: self.chains(),
             pools: self.pools(),
+            pool_runtime: self.pool_runtime(),
             profiles: self.profiles(),
             contribution: self.contribution_status(),
             events: self.events(),
@@ -251,6 +267,7 @@ impl Supervisor {
             miner: self.miner_status(),
             chains: self.chains(),
             pools: self.pools(),
+            pool_runtime: self.pool_runtime(),
             profiles: self.profiles(),
             contribution: self.contribution_status(),
             update: self.update_status(),
@@ -264,6 +281,7 @@ impl Supervisor {
         let miner = self.miner_status();
         let contribution = self.contribution_status();
         let pools = self.pools();
+        let pool_runtime = self.pool_runtime();
         let profiles = self.profiles();
         let update = self.update_status();
         let mut output = String::new();
@@ -331,6 +349,41 @@ impl Supervisor {
             &mut output,
             "omo_pool_active_priority",
             pools.active_priority.map_or(-1_i32, i32::from),
+        );
+        metric(
+            &mut output,
+            "omo_pool_latency_warning_ms",
+            pool_runtime.policy.latency_warning_ms,
+        );
+        metric(
+            &mut output,
+            "omo_pool_job_processing_budget_ms",
+            pool_runtime.policy.job_processing_budget_ms,
+        );
+        metric(
+            &mut output,
+            "omo_pool_reconnect_min_interval_seconds",
+            pool_runtime.policy.reconnect_min_interval_seconds,
+        );
+        metric(
+            &mut output,
+            "omo_pool_failover_cooldown_seconds",
+            pool_runtime.policy.failover_cooldown_seconds,
+        );
+        metric(
+            &mut output,
+            "omo_pool_reconnects_total",
+            pool_runtime.reconnects_total,
+        );
+        metric(
+            &mut output,
+            "omo_pool_reconnect_suppressed_total",
+            pool_runtime.reconnect_suppressed_total,
+        );
+        metric(
+            &mut output,
+            "omo_pool_stale_jobs_total",
+            pool_runtime.stale_jobs_total,
         );
 
         labeled_metric(
@@ -694,6 +747,44 @@ mod tests {
         );
         assert!(serialized.contains("\"password_set\":true"));
         assert!(!serialized.contains("super-secret"));
+    }
+
+    #[test]
+    fn pool_runtime_policy_is_exposed_without_fake_latency() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [pool_policy]
+            latency_warning_ms = 250
+            job_processing_budget_ms = 25
+            reconnect_min_interval_seconds = 20
+            failover_cooldown_seconds = 90
+            keepalive_interval_seconds = 15
+
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool.example:3333"
+            user = "acct.worker"
+            password = "super-secret"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        let supervisor =
+            Supervisor::with_config(Model::S19jPro, BoardFamily::Xilinx, config).unwrap();
+        let runtime = supervisor.pool_runtime();
+        let overview = supervisor.dashboard_overview();
+        let metrics = supervisor.prometheus_metrics();
+
+        assert_eq!(runtime.policy.latency_warning_ms, 250);
+        assert_eq!(runtime.policy.job_processing_budget_ms, 25);
+        assert_eq!(runtime.active_latency_ms, None);
+        assert_eq!(
+            overview.pool_runtime.policy.reconnect_min_interval_seconds,
+            20
+        );
+        assert!(metrics.contains("omo_pool_latency_warning_ms 250"));
+        assert!(metrics.contains("omo_pool_job_processing_budget_ms 25"));
+        assert!(!metrics.contains("super-secret"));
     }
 
     #[test]

@@ -28,7 +28,8 @@ pub use manifest::{
 };
 pub use overview::DashboardOverview;
 pub use pool::{
-    PoolConfig, PoolConfigError, PoolInfo, PoolSummary, summarize_pools, validate_pools,
+    PoolConfig, PoolConfigError, PoolConnectionPolicy, PoolInfo, PoolRuntimeState,
+    PoolRuntimeSummary, PoolSummary, summarize_pool_runtime, summarize_pools, validate_pools,
 };
 pub use probe::{HardwareProbeReport, HardwareProbeSummary, ProbeCheck, ProbeStatus};
 pub use status::{

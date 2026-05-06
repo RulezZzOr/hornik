@@ -1,6 +1,6 @@
 use crate::{
-    ContributionConfig, ContributionConfigError, PoolConfig, PoolConfigError, TuningConfig,
-    TuningConfigError, validate_pools,
+    ContributionConfig, ContributionConfigError, PoolConfig, PoolConfigError, PoolConnectionPolicy,
+    TuningConfig, TuningConfigError, validate_pools,
 };
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
@@ -15,6 +15,8 @@ pub struct RuntimeConfig {
     pub tuning: TuningConfig,
     #[serde(default)]
     pub pools: Vec<PoolConfig>,
+    #[serde(default)]
+    pub pool_policy: PoolConnectionPolicy,
 }
 
 impl RuntimeConfig {
@@ -37,6 +39,9 @@ impl RuntimeConfig {
             .validate()
             .map_err(ConfigError::Contribution)?;
         self.tuning.validate().map_err(ConfigError::Tuning)?;
+        self.pool_policy
+            .validate()
+            .map_err(ConfigError::PoolPolicy)?;
         validate_pools(&self.pools).map_err(ConfigError::Pools)
     }
 }
@@ -53,6 +58,8 @@ pub enum ConfigError {
     Tuning(#[source] TuningConfigError),
     #[error("invalid pool config: {0}")]
     Pools(#[source] PoolConfigError),
+    #[error("invalid pool policy: {0}")]
+    PoolPolicy(#[source] PoolConfigError),
 }
 
 #[cfg(test)]
@@ -67,6 +74,7 @@ mod tests {
         assert!(!config.contribution.enabled);
         assert_eq!(config.contribution.rate_percent, 0.0);
         assert_eq!(config.tuning.mode, crate::TuningMode::StockLike);
+        assert_eq!(config.pool_policy.latency_warning_ms, 500);
         assert!(config.pools.is_empty());
     }
 
@@ -231,5 +239,38 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, ConfigError::Parse(_)));
+    }
+
+    #[test]
+    fn parses_pool_connection_policy() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [pool_policy]
+            latency_warning_ms = 250
+            job_processing_budget_ms = 25
+            reconnect_min_interval_seconds = 20
+            failover_cooldown_seconds = 90
+            keepalive_interval_seconds = 15
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(config.pool_policy.latency_warning_ms, 250);
+        assert_eq!(config.pool_policy.job_processing_budget_ms, 25);
+        assert_eq!(config.pool_policy.reconnect_min_interval_seconds, 20);
+    }
+
+    #[test]
+    fn rejects_invalid_pool_connection_policy() {
+        let err = RuntimeConfig::from_toml_str(
+            r#"
+            [pool_policy]
+            latency_warning_ms = 25
+            job_processing_budget_ms = 50
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, ConfigError::PoolPolicy(_)));
     }
 }

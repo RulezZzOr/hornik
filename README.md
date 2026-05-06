@@ -12,6 +12,7 @@ Build `0.1.0` is a safe development baseline:
 - Simulated ASIC backend for local API and UI development.
 - REST endpoints for dashboard overview, system info, health, miner status, chains, contribution status, and Prometheus metrics.
 - Validated user pool config with redacted pool status API.
+- Pool latency, job processing, and reconnect policy surfaced for the future stratum engine.
 - Validated tuning profile config with read-only profile API.
 - Deterministic in-memory event snapshot API.
 - WebSocket event snapshot and heartbeat API.

@@ -13,6 +13,13 @@ rate_percent = 0.0
 mode = "stock_like"
 target_type = "watts"
 autotune = false
+
+[pool_policy]
+latency_warning_ms = 500
+job_processing_budget_ms = 50
+reconnect_min_interval_seconds = 15
+failover_cooldown_seconds = 60
+keepalive_interval_seconds = 30
 ```
 
 Validate a config file:
@@ -101,6 +108,34 @@ Pool configuration affects event output:
 
 Support bundles expose pool metadata with `password_set`, but never include
 pool passwords.
+
+## Pool Policy
+
+The pool policy is the first contract for the future stratum engine. It
+prioritizes low pool latency, fast job processing, and stable persistent
+connections over aggressive reconnect loops.
+
+```toml
+[pool_policy]
+latency_warning_ms = 500
+job_processing_budget_ms = 50
+reconnect_min_interval_seconds = 15
+failover_cooldown_seconds = 60
+keepalive_interval_seconds = 30
+```
+
+Validation rules:
+
+- `latency_warning_ms` must be greater than zero,
+- `job_processing_budget_ms` must be greater than zero,
+- `job_processing_budget_ms` must not exceed `latency_warning_ms`,
+- `reconnect_min_interval_seconds` must be greater than zero,
+- `failover_cooldown_seconds` must be at least `reconnect_min_interval_seconds`,
+- `keepalive_interval_seconds` must be greater than zero.
+
+Build `0.1.0` exposes policy and zeroed runtime counters only. Real stratum
+latency, job processing, stale-job, and reconnect counters come with the network
+engine.
 
 ## Tuning
 

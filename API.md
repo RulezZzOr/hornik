@@ -27,6 +27,7 @@ Overview response:
   "miner": {},
   "chains": [],
   "pools": {},
+  "pool_runtime": {},
   "profiles": {},
   "contribution": {},
   "update": {},
@@ -235,6 +236,34 @@ Example:
 }
 ```
 
+The overview response also includes `pool_runtime`, which is the performance
+contract for the future stratum engine:
+
+```json
+{
+  "state": "ready_no_connection",
+  "active_priority": 0,
+  "active_latency_ms": null,
+  "job_processing_p50_ms": null,
+  "job_processing_p99_ms": null,
+  "reconnects_total": 0,
+  "reconnect_suppressed_total": 0,
+  "stale_jobs_total": 0,
+  "policy": {
+    "latency_warning_ms": 500,
+    "job_processing_budget_ms": 50,
+    "reconnect_min_interval_seconds": 15,
+    "failover_cooldown_seconds": 60,
+    "keepalive_interval_seconds": 30
+  }
+}
+```
+
+Build `0.1.0` does not connect to pools yet, so latency and job-processing
+values are `null` and counters are zero. The policy is intentionally strict:
+low latency, fast job handling, and reconnect suppression are first-class
+requirements for the miner engine.
+
 Profiles response:
 
 ```json
@@ -312,6 +341,13 @@ omo_system_health_severity
 omo_pool_configured_total
 omo_pool_enabled_total
 omo_pool_active_priority
+omo_pool_latency_warning_ms
+omo_pool_job_processing_budget_ms
+omo_pool_reconnect_min_interval_seconds
+omo_pool_failover_cooldown_seconds
+omo_pool_reconnects_total
+omo_pool_reconnect_suppressed_total
+omo_pool_stale_jobs_total
 omo_tuning_profile_active{profile="stock_like"}
 omo_tuning_profile_available{profile="manual"}
 omo_update_rollback_available

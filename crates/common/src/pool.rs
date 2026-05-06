@@ -62,6 +62,111 @@ pub struct PoolSummary {
     pub pools: Vec<PoolInfo>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PoolConnectionPolicy {
+    #[serde(default = "default_latency_warning_ms")]
+    pub latency_warning_ms: u32,
+    #[serde(default = "default_job_processing_budget_ms")]
+    pub job_processing_budget_ms: u32,
+    #[serde(default = "default_reconnect_min_interval_seconds")]
+    pub reconnect_min_interval_seconds: u32,
+    #[serde(default = "default_failover_cooldown_seconds")]
+    pub failover_cooldown_seconds: u32,
+    #[serde(default = "default_keepalive_interval_seconds")]
+    pub keepalive_interval_seconds: u32,
+}
+
+impl Default for PoolConnectionPolicy {
+    fn default() -> Self {
+        Self {
+            latency_warning_ms: 500,
+            job_processing_budget_ms: 50,
+            reconnect_min_interval_seconds: 15,
+            failover_cooldown_seconds: 60,
+            keepalive_interval_seconds: 30,
+        }
+    }
+}
+
+impl PoolConnectionPolicy {
+    pub fn validate(self) -> Result<(), PoolConfigError> {
+        if self.latency_warning_ms == 0 {
+            return Err(PoolConfigError::InvalidConnectionPolicy(
+                "latency_warning_ms must be greater than zero",
+            ));
+        }
+        if self.job_processing_budget_ms == 0 {
+            return Err(PoolConfigError::InvalidConnectionPolicy(
+                "job_processing_budget_ms must be greater than zero",
+            ));
+        }
+        if self.job_processing_budget_ms > self.latency_warning_ms {
+            return Err(PoolConfigError::InvalidConnectionPolicy(
+                "job_processing_budget_ms must not exceed latency_warning_ms",
+            ));
+        }
+        if self.reconnect_min_interval_seconds == 0 {
+            return Err(PoolConfigError::InvalidConnectionPolicy(
+                "reconnect_min_interval_seconds must be greater than zero",
+            ));
+        }
+        if self.failover_cooldown_seconds < self.reconnect_min_interval_seconds {
+            return Err(PoolConfigError::InvalidConnectionPolicy(
+                "failover_cooldown_seconds must be at least reconnect_min_interval_seconds",
+            ));
+        }
+        if self.keepalive_interval_seconds == 0 {
+            return Err(PoolConfigError::InvalidConnectionPolicy(
+                "keepalive_interval_seconds must be greater than zero",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+fn default_latency_warning_ms() -> u32 {
+    PoolConnectionPolicy::default().latency_warning_ms
+}
+
+fn default_job_processing_budget_ms() -> u32 {
+    PoolConnectionPolicy::default().job_processing_budget_ms
+}
+
+fn default_reconnect_min_interval_seconds() -> u32 {
+    PoolConnectionPolicy::default().reconnect_min_interval_seconds
+}
+
+fn default_failover_cooldown_seconds() -> u32 {
+    PoolConnectionPolicy::default().failover_cooldown_seconds
+}
+
+fn default_keepalive_interval_seconds() -> u32 {
+    PoolConnectionPolicy::default().keepalive_interval_seconds
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolRuntimeState {
+    Unconfigured,
+    ReadyNoConnection,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PoolRuntimeSummary {
+    pub state: PoolRuntimeState,
+    pub active_priority: Option<u8>,
+    pub active_latency_ms: Option<f64>,
+    pub job_processing_p50_ms: Option<f64>,
+    pub job_processing_p99_ms: Option<f64>,
+    pub reconnects_total: u64,
+    pub reconnect_suppressed_total: u64,
+    pub stale_jobs_total: u64,
+    pub policy: PoolConnectionPolicy,
+    pub notes: Vec<String>,
+}
+
 pub fn summarize_pools(pools: &[PoolConfig]) -> PoolSummary {
     let active_priority = pools
         .iter()
@@ -77,6 +182,34 @@ pub fn summarize_pools(pools: &[PoolConfig]) -> PoolSummary {
             .iter()
             .map(|pool| pool.redacted(Some(pool.priority) == active_priority))
             .collect(),
+    }
+}
+
+pub fn summarize_pool_runtime(
+    pools: &[PoolConfig],
+    policy: PoolConnectionPolicy,
+) -> PoolRuntimeSummary {
+    let summary = summarize_pools(pools);
+    let state = if summary.enabled == 0 {
+        PoolRuntimeState::Unconfigured
+    } else {
+        PoolRuntimeState::ReadyNoConnection
+    };
+
+    PoolRuntimeSummary {
+        state,
+        active_priority: summary.active_priority,
+        active_latency_ms: None,
+        job_processing_p50_ms: None,
+        job_processing_p99_ms: None,
+        reconnects_total: 0,
+        reconnect_suppressed_total: 0,
+        stale_jobs_total: 0,
+        policy,
+        notes: vec![
+            "build 0.1.0 exposes pool latency and reconnect policy before stratum networking is enabled".to_string(),
+            "future stratum engine must prefer low latency, fast job processing, and stable persistent connections".to_string(),
+        ],
     }
 }
 
@@ -109,6 +242,8 @@ pub enum PoolConfigError {
     UnsupportedUrlScheme { priority: u8, url: String },
     #[error("enabled pool {priority} is missing user")]
     MissingUser { priority: u8 },
+    #[error("invalid pool connection policy: {0}")]
+    InvalidConnectionPolicy(&'static str),
 }
 
 #[cfg(test)]
@@ -161,6 +296,39 @@ mod tests {
 
         assert_eq!(info.priority, 0);
         assert!(info.password_set);
+    }
+
+    #[test]
+    fn default_connection_policy_prioritizes_latency_and_reconnect_hygiene() {
+        let policy = PoolConnectionPolicy::default();
+
+        assert_eq!(policy.latency_warning_ms, 500);
+        assert_eq!(policy.job_processing_budget_ms, 50);
+        assert_eq!(policy.reconnect_min_interval_seconds, 15);
+        assert!(policy.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_job_processing_budget_above_latency_warning() {
+        let err = PoolConnectionPolicy {
+            latency_warning_ms: 25,
+            job_processing_budget_ms: 50,
+            ..PoolConnectionPolicy::default()
+        }
+        .validate()
+        .unwrap_err();
+
+        assert!(matches!(err, PoolConfigError::InvalidConnectionPolicy(_)));
+    }
+
+    #[test]
+    fn summarizes_pool_runtime_without_fake_latency() {
+        let runtime = summarize_pool_runtime(&[pool(0, true)], PoolConnectionPolicy::default());
+
+        assert_eq!(runtime.state, PoolRuntimeState::ReadyNoConnection);
+        assert_eq!(runtime.active_priority, Some(0));
+        assert_eq!(runtime.active_latency_ms, None);
+        assert_eq!(runtime.reconnects_total, 0);
     }
 
     fn pool(priority: u8, enabled: bool) -> PoolConfig {

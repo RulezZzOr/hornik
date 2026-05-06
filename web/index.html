@@ -414,6 +414,31 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Pool Performance</h2>
+                <span class="state" id="pool-runtime-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Latency Warn</div>
+                  <div class="kv-value" id="pool-latency-policy">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Job Budget</div>
+                  <div class="kv-value" id="pool-job-budget">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Reconnect</div>
+                  <div class="kv-value" id="pool-reconnect-policy">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Counters</div>
+                  <div class="kv-value" id="pool-counters">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Events</h2>
                 <span class="state" id="event-count">--</span>
               </div>
@@ -601,6 +626,7 @@
         renderSummary(overview);
         renderChains(overview.chains);
         renderPools(overview.pools);
+        renderPoolRuntime(overview.pool_runtime);
         renderSystem(overview);
         renderTuning(overview.profiles);
         renderSlots(overview.update);
@@ -680,6 +706,21 @@
             </tr>`,
           )
           .join("");
+      }
+
+      function renderPoolRuntime(runtime) {
+        if (!runtime) return;
+        text("pool-runtime-state", runtime.state);
+        text("pool-latency-policy", `${runtime.policy.latency_warning_ms} ms`);
+        text("pool-job-budget", `${runtime.policy.job_processing_budget_ms} ms`);
+        text(
+          "pool-reconnect-policy",
+          `min ${runtime.policy.reconnect_min_interval_seconds}s / failover ${runtime.policy.failover_cooldown_seconds}s`,
+        );
+        text(
+          "pool-counters",
+          `${runtime.reconnects_total} reconnects / ${runtime.reconnect_suppressed_total} suppressed / ${runtime.stale_jobs_total} stale jobs`,
+        );
       }
 
       function renderSystem(overview) {
