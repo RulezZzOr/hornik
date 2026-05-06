@@ -32,6 +32,8 @@ make image BOARD=s19-xil MODEL=s19j-pro
 make image BOARD=s19-bb MODEL=s19j-pro
 make image BOARD=s19-aml MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
+cargo run -p openmineros-commander -- verify-manifest \
+  --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```
 
 The generated files are metadata-only development artefacts in `dist/`.
@@ -49,5 +51,6 @@ They are intentionally not flashable firmware images.
 ## Development Contribution
 
 OpenMinerOS does not ship a mandatory devfee. The optional contribution target
-is public and auditable in [DEVFEE.md](DEVFEE.md). Hidden wallet addresses,
-obfuscated pool URLs, and silent redirects are out of scope for this project.
+is public, auditable, and locked in official builds as described in
+[DEVFEE.md](DEVFEE.md). Hidden wallet addresses, obfuscated pool URLs, and
+silent redirects are out of scope for this project.

@@ -13,5 +13,6 @@ trap 'rm -rf "$tmp_a" "$tmp_b"' EXIT
 ./scripts/build-image.sh "$board" "$model" "$version" "$tmp_b" >/dev/null
 
 diff -ru "$tmp_a" "$tmp_b"
+cargo run -q -p openmineros-commander -- verify-manifest \
+  --manifest "$tmp_a/openmineros-${board}-${model}-${version}-manifest.json" >/dev/null
 echo "reproducible placeholder artefacts verified for $board/$model $version"
-

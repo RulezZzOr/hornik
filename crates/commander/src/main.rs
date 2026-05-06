@@ -1,6 +1,9 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use openmineros_common::{BoardFamily, Model, SupportLevel, supported_targets};
+use openmineros_common::{
+    BoardFamily, Model, SupportLevel, supported_targets, verify_manifest_file,
+};
+use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "omo-commander")]
@@ -22,6 +25,14 @@ enum Command {
     Scan {
         #[arg(long, default_value = "192.168.1.0/24")]
         subnet: String,
+    },
+    VerifyManifest {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        artifact_dir: Option<PathBuf>,
+        #[arg(long)]
+        allow_flashable_unsigned: bool,
     },
 }
 
@@ -60,6 +71,21 @@ fn main() -> anyhow::Result<()> {
                     "note": "network probing is intentionally not implemented in build 0.1.0"
                 })
             );
+        }
+        Command::VerifyManifest {
+            manifest,
+            artifact_dir,
+            allow_flashable_unsigned,
+        } => {
+            let artifact_dir = artifact_dir.unwrap_or_else(|| {
+                manifest
+                    .parent()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."))
+            });
+            let report = verify_manifest_file(&manifest, artifact_dir, allow_flashable_unsigned)?;
+
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
     }
 

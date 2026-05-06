@@ -22,6 +22,10 @@ rate from `0.0` to `3.0`.
 Contribution configuration is public by design. The project does not hide,
 obfuscate, or silently redirect contribution mining.
 
+Official builds expose the beneficiary and endpoints for audit, but do not allow
+runtime config to override them. The mutable contribution fields are only
+`enabled` and `rate_percent`.
+
 Default opt-in contribution target:
 
 ```json

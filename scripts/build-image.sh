@@ -27,22 +27,36 @@ name="openmineros-${board}-${model}-${version}"
 manifest="$dist_dir/${name}-manifest.json"
 image="$dist_dir/${name}-install.img.xz"
 
+printf '%s\n' "OpenMinerOS $version placeholder artefact" \
+  "board=$board" \
+  "model=$model" \
+  "flashable=false" > "$image"
+
+image_file="$(basename "$image")"
+image_sha256="$(sha256sum "$image" | awk '{print $1}')"
+image_bytes="$(wc -c < "$image" | tr -d ' ')"
+
 cat > "$manifest" <<EOF_MANIFEST
 {
+  "schema_version": 1,
   "name": "$name",
   "version": "$version",
   "board": "$board",
   "model": "$model",
   "kind": "development-placeholder",
   "flashable": false,
+  "artifacts": [
+    {
+      "path": "$image_file",
+      "kind": "install-image",
+      "sha256": "$image_sha256",
+      "bytes": $image_bytes
+    }
+  ],
+  "signature": null,
   "warning": "This is not a real firmware image. It is a reproducible build pipeline placeholder for OpenMinerOS 0.1.0."
 }
 EOF_MANIFEST
-
-printf '%s\n' "OpenMinerOS $version placeholder artefact" \
-  "board=$board" \
-  "model=$model" \
-  "flashable=false" > "$image"
 
 (
   cd "$dist_dir"
@@ -51,4 +65,3 @@ printf '%s\n' "OpenMinerOS $version placeholder artefact" \
 
 echo "$manifest"
 echo "$image"
-
