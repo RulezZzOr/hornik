@@ -5,6 +5,7 @@ All public REST endpoints are versioned under `/api/v1`.
 ## System
 
 - `GET /api/v1/overview`
+- `GET /api/v1/hardware/targets`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
 - `GET /api/v1/events`
@@ -32,6 +33,39 @@ The overview endpoint is the primary dashboard read model. It combines the
 same redacted runtime state exposed by the narrower endpoints and does not
 include pool passwords, session tokens, private keys, or hidden contribution
 targets.
+
+Hardware target catalog:
+
+```json
+{
+  "schema_version": 1,
+  "boards": [
+    {
+      "family": "xilinx",
+      "board_id": "s19-xil",
+      "display_name": "Xilinx / Zynq",
+      "soc": "Zynq",
+      "recovery": "external microSD",
+      "capabilities": {
+        "flags": ["install.sd", "install.commander", "update.ab"]
+      }
+    }
+  ],
+  "targets": [
+    {
+      "model": "s19j-pro",
+      "board": "xilinx",
+      "support": "mvp-stable"
+    }
+  ],
+  "notes": []
+}
+```
+
+Build `0.1.0` treats S19j Pro on Xilinx, BeagleBone Black, and Amlogic as
+MVP-stable. Other S19-class Xilinx, BeagleBone Black, and Amlogic targets are
+listed as experimental until hardware validation is complete. CVitek is listed
+for operator identification but is not supported in build `0.1.0`.
 
 Events response:
 

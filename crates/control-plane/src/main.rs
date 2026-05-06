@@ -13,7 +13,7 @@ use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
     MinerStatus, Model, PoolSummary, ProfilesResponse, RuntimeConfig, SupportBundle, SystemInfo,
-    UpdateStatus,
+    TargetCatalog, UpdateStatus, target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -56,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", get(index))
         .route("/api/v1/overview", get(overview))
+        .route("/api/v1/hardware/targets", get(hardware_targets))
         .route("/api/v1/system/info", get(system_info))
         .route("/api/v1/system/health", get(system_health))
         .route("/api/v1/miner/status", get(miner_status))
@@ -85,6 +86,10 @@ async fn index() -> Html<&'static str> {
 
 async fn overview(State(supervisor): State<Arc<Supervisor>>) -> Json<DashboardOverview> {
     Json(supervisor.dashboard_overview())
+}
+
+async fn hardware_targets() -> Json<TargetCatalog> {
+    Json(target_catalog())
 }
 
 async fn system_info(State(supervisor): State<Arc<Supervisor>>) -> Json<SystemInfo> {

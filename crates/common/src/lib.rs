@@ -11,8 +11,8 @@ pub mod tuning;
 pub mod update;
 
 pub use board::{
-    BoardFamily, BoardProfile, Capability, CapabilitySet, Model, SupportLevel, SupportedTarget,
-    TargetError, supported_targets,
+    BoardCatalogEntry, BoardFamily, BoardProfile, Capability, CapabilitySet, Model, SupportLevel,
+    SupportedTarget, TargetCatalog, TargetError, board_catalog, supported_targets, target_catalog,
 };
 pub use config::{ConfigError, RuntimeConfig};
 pub use contribution::{

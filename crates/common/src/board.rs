@@ -169,6 +169,28 @@ pub struct SupportedTarget {
     pub support: SupportLevel,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BoardCatalogEntry {
+    pub family: BoardFamily,
+    pub board_id: String,
+    pub display_name: String,
+    pub soc: String,
+    pub recovery: String,
+    pub capabilities: CapabilitySet,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TargetCatalog {
+    pub schema_version: u8,
+    pub boards: Vec<BoardCatalogEntry>,
+    pub targets: Vec<SupportedTarget>,
+    pub notes: Vec<String>,
+}
+
+impl TargetCatalog {
+    pub const SCHEMA_VERSION: u8 = 1;
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TargetError {
     #[error("unknown board family: {0}")]
@@ -180,44 +202,118 @@ pub enum TargetError {
 }
 
 pub fn supported_targets() -> Vec<SupportedTarget> {
-    let boards = [
+    let supported_boards = [
         BoardFamily::Xilinx,
         BoardFamily::BeagleBone,
         BoardFamily::Amlogic,
     ];
-    let mut targets = Vec::new();
-
-    for board in boards {
-        targets.push(SupportedTarget {
-            model: Model::S19jPro,
-            board,
-            support: SupportLevel::MvpStable,
-        });
-    }
-
-    for model in [
+    let all_boards = [
+        BoardFamily::Xilinx,
+        BoardFamily::BeagleBone,
+        BoardFamily::Amlogic,
+        BoardFamily::Cvitek,
+    ];
+    let all_models = [
         Model::S19,
         Model::S19Pro,
         Model::S19j,
+        Model::S19jPro,
         Model::S19Xp,
         Model::T19,
-    ] {
-        for board in boards {
+    ];
+    let mut targets = Vec::new();
+
+    for model in all_models {
+        for board in all_boards {
+            let support = if model == Model::S19jPro && supported_boards.contains(&board) {
+                SupportLevel::MvpStable
+            } else if supported_boards.contains(&board) {
+                SupportLevel::Experimental
+            } else {
+                SupportLevel::Unsupported
+            };
             targets.push(SupportedTarget {
                 model,
                 board,
-                support: SupportLevel::Experimental,
+                support,
             });
         }
     }
 
-    targets.push(SupportedTarget {
-        model: Model::S19jPro,
-        board: BoardFamily::Cvitek,
-        support: SupportLevel::Unsupported,
-    });
-
     targets
+}
+
+pub fn target_catalog() -> TargetCatalog {
+    TargetCatalog {
+        schema_version: TargetCatalog::SCHEMA_VERSION,
+        boards: board_catalog(),
+        targets: supported_targets(),
+        notes: vec![
+            "build 0.1.0 treats S19j Pro on Xilinx, BeagleBone Black, and Amlogic as MVP-stable targets".to_string(),
+            "other S19-class Xilinx, BeagleBone Black, and Amlogic targets are exposed as experimental until tested on hardware".to_string(),
+            "CVitek is listed for operator identification but is not supported by build 0.1.0".to_string(),
+        ],
+    }
+}
+
+pub fn board_catalog() -> Vec<BoardCatalogEntry> {
+    [
+        (
+            BoardFamily::Xilinx,
+            "Zynq",
+            "external microSD",
+            CapabilitySet::from_flags([
+                Capability::InstallSd,
+                Capability::InstallCommander,
+                Capability::UpdateAb,
+                Capability::FanControl,
+                Capability::ChainIsolation,
+                Capability::SafeMode,
+            ]),
+        ),
+        (
+            BoardFamily::BeagleBone,
+            "AM335x",
+            "internal microSD",
+            CapabilitySet::from_flags([
+                Capability::InstallSd,
+                Capability::InstallCommander,
+                Capability::UpdateAb,
+                Capability::FanControl,
+                Capability::ChainIsolation,
+                Capability::SafeMode,
+            ]),
+        ),
+        (
+            BoardFamily::Amlogic,
+            "A113D",
+            "micro-USB OTG",
+            CapabilitySet::from_flags([
+                Capability::InstallOtg,
+                Capability::InstallCommander,
+                Capability::UpdateAb,
+                Capability::FanControl,
+                Capability::ChainIsolation,
+                Capability::SafeMode,
+            ]),
+        ),
+        (
+            BoardFamily::Cvitek,
+            "CV1835",
+            "unsupported in 0.1.0",
+            CapabilitySet::from_flags([Capability::SafeMode]),
+        ),
+    ]
+    .into_iter()
+    .map(|(family, soc, recovery, capabilities)| BoardCatalogEntry {
+        family,
+        board_id: family.board_id().to_string(),
+        display_name: family.display_name().to_string(),
+        soc: soc.to_string(),
+        recovery: recovery.to_string(),
+        capabilities,
+    })
+    .collect()
 }
 
 #[cfg(test)]
@@ -248,5 +344,24 @@ mod tests {
                 BoardFamily::Amlogic
             ]
         );
+    }
+
+    #[test]
+    fn target_catalog_includes_all_model_board_pairs() {
+        let catalog = target_catalog();
+
+        assert_eq!(catalog.schema_version, TargetCatalog::SCHEMA_VERSION);
+        assert_eq!(catalog.boards.len(), 4);
+        assert_eq!(catalog.targets.len(), 24);
+        assert!(catalog.targets.iter().any(|target| {
+            target.model == Model::S19jPro
+                && target.board == BoardFamily::Cvitek
+                && target.support == SupportLevel::Unsupported
+        }));
+        assert!(catalog.targets.iter().any(|target| {
+            target.model == Model::S19Xp
+                && target.board == BoardFamily::Xilinx
+                && target.support == SupportLevel::Experimental
+        }));
     }
 }

@@ -2,7 +2,7 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use openmineros_common::{
     BoardFamily, ContributionStatus, Model, ProfilesResponse, RuntimeConfig, SupportLevel,
-    summarize_pools, supported_targets, verify_manifest_file,
+    summarize_pools, supported_targets, target_catalog, verify_manifest_file,
 };
 use std::path::PathBuf;
 
@@ -46,7 +46,7 @@ fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::Matrix => {
-            println!("{}", serde_json::to_string_pretty(&supported_targets())?);
+            println!("{}", serde_json::to_string_pretty(&target_catalog())?);
         }
         Command::Identify { board, model } => {
             let board: BoardFamily = board.parse().context("invalid board")?;

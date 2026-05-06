@@ -51,11 +51,15 @@ They are intentionally not flashable firmware images.
 
 - `GET /api/v1/system/info`
 - `GET /api/v1/overview`
+- `GET /api/v1/hardware/targets`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
 - `GET /api/v1/chains`
 - `GET /api/v1/contribution/status`
 - `GET /metrics`
+
+`omo-commander matrix` returns the same hardware catalog used by
+`GET /api/v1/hardware/targets`.
 
 ## Config
 

@@ -419,6 +419,25 @@
               </div>
               <div class="events" id="events"></div>
             </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Hardware Matrix</h2>
+                <span class="state" id="target-count">--</span>
+              </div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>XIL</th>
+                    <th>BB</th>
+                    <th>AML</th>
+                    <th>CVitek</th>
+                  </tr>
+                </thead>
+                <tbody id="targets"></tbody>
+              </table>
+            </section>
           </div>
 
           <div class="panel-stack">
@@ -475,6 +494,14 @@
               </div>
               <div class="kv" id="slots"></div>
             </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Board Recovery</h2>
+                <span class="state" id="board-count">--</span>
+              </div>
+              <div class="kv" id="boards"></div>
+            </section>
           </div>
         </section>
       </div>
@@ -483,6 +510,7 @@
     <script>
       const state = {
         lastOverview: null,
+        hardware: null,
         events: [],
       };
 
@@ -519,11 +547,22 @@
           .replace(/'/g, "&#039;");
 
       async function refresh() {
-        const response = await fetch("/api/v1/overview", { cache: "no-store" });
-        if (!response.ok) {
-          throw new Error(`overview failed: ${response.status}`);
+        const [overviewResponse, hardwareResponse] = await Promise.all([
+          fetch("/api/v1/overview", { cache: "no-store" }),
+          state.hardware
+            ? Promise.resolve(null)
+            : fetch("/api/v1/hardware/targets", { cache: "no-store" }),
+        ]);
+        if (!overviewResponse.ok) {
+          throw new Error(`overview failed: ${overviewResponse.status}`);
         }
-        const overview = await response.json();
+        if (hardwareResponse && !hardwareResponse.ok) {
+          throw new Error(`hardware targets failed: ${hardwareResponse.status}`);
+        }
+        const overview = await overviewResponse.json();
+        if (hardwareResponse) {
+          state.hardware = await hardwareResponse.json();
+        }
         state.lastOverview = overview;
         state.events = uniqueEvents(overview.events.events.slice().reverse()).slice(0, 8);
         render(overview);
@@ -537,6 +576,7 @@
         renderSystem(overview);
         renderTuning(overview.profiles);
         renderSlots(overview.update);
+        renderHardware(state.hardware);
         renderEvents();
       }
 
@@ -654,6 +694,63 @@
             </div>`,
           )
           .join("");
+      }
+
+      function renderHardware(hardware) {
+        if (!hardware) return;
+        const stable = hardware.targets.filter(
+          (target) => target.support === "mvp-stable",
+        ).length;
+        text("target-count", `${stable}/${hardware.targets.length} stable`);
+        text("board-count", `${hardware.boards.length} boards`);
+        renderTargetMatrix(hardware);
+        renderBoardRecovery(hardware.boards);
+      }
+
+      function renderTargetMatrix(hardware) {
+        const models = [...new Set(hardware.targets.map((target) => target.model))];
+        const boards = ["xilinx", "beagle-bone", "amlogic", "cvitek"];
+        const byPair = new Map(
+          hardware.targets.map((target) => [`${target.model}:${target.board}`, target]),
+        );
+        byId("targets").innerHTML = models
+          .map((model) => {
+            const cells = boards
+              .map((board) => {
+                const target = byPair.get(`${model}:${board}`);
+                const support = target ? target.support : "unsupported";
+                return `<td>${badge(shortSupport(support), supportClass(support))}</td>`;
+              })
+              .join("");
+            return `<tr><td>${escapeHtml(model)}</td>${cells}</tr>`;
+          })
+          .join("");
+      }
+
+      function renderBoardRecovery(boards) {
+        byId("boards").innerHTML = boards
+          .map(
+            (board) => `<div class="kv-row">
+              <div class="kv-key">${escapeHtml(board.board_id)}</div>
+              <div class="kv-value">
+                ${escapeHtml(board.display_name)} / ${escapeHtml(board.soc)}
+                <br />${escapeHtml(board.recovery)}
+              </div>
+            </div>`,
+          )
+          .join("");
+      }
+
+      function shortSupport(support) {
+        if (support === "mvp-stable") return "stable";
+        if (support === "experimental") return "exp";
+        return "none";
+      }
+
+      function supportClass(support) {
+        if (support === "mvp-stable") return "ok";
+        if (support === "experimental") return "warn";
+        return "error";
       }
 
       function renderEvents() {
