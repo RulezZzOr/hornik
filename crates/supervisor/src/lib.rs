@@ -207,6 +207,229 @@ impl Supervisor {
     pub fn update_status(&self) -> UpdateStatus {
         UpdateStatus::development_default(self.active_slot.clone(), env!("CARGO_PKG_VERSION"))
     }
+
+    pub fn prometheus_metrics(&self) -> String {
+        let system = self.system_info();
+        let health = self.health();
+        let miner = self.miner_status();
+        let contribution = self.contribution_status();
+        let pools = self.pools();
+        let profiles = self.profiles();
+        let update = self.update_status();
+        let mut output = String::new();
+
+        metric(&mut output, "omo_miner_hashrate_ths", miner.hashrate_ths);
+        metric(&mut output, "omo_miner_power_watts", miner.power_w);
+        metric(
+            &mut output,
+            "omo_miner_efficiency_j_th",
+            miner.efficiency_j_th,
+        );
+        metric(
+            &mut output,
+            "omo_miner_uptime_seconds",
+            system.uptime_seconds,
+        );
+        metric(
+            &mut output,
+            "omo_shares_accepted_total",
+            miner.accepted_shares,
+        );
+        metric(
+            &mut output,
+            "omo_shares_rejected_total",
+            miner.rejected_shares,
+        );
+        labeled_metric(
+            &mut output,
+            "omo_miner_mode_active",
+            &[("mode", miner_mode_label(miner.mode))],
+            1,
+        );
+
+        labeled_metric(
+            &mut output,
+            "omo_system_health_state",
+            &[("state", health_state_label(health.state))],
+            1,
+        );
+        metric(
+            &mut output,
+            "omo_system_health_severity",
+            severity_value(health.severity),
+        );
+
+        metric(
+            &mut output,
+            "omo_contribution_enabled",
+            bool_value(contribution.enabled),
+        );
+        metric(
+            &mut output,
+            "omo_contribution_rate_percent",
+            contribution.rate_percent,
+        );
+        metric(
+            &mut output,
+            "omo_contribution_target_locked",
+            bool_value(contribution.target_locked),
+        );
+
+        metric(&mut output, "omo_pool_configured_total", pools.configured);
+        metric(&mut output, "omo_pool_enabled_total", pools.enabled);
+        metric(
+            &mut output,
+            "omo_pool_active_priority",
+            pools.active_priority.map_or(-1_i32, i32::from),
+        );
+
+        labeled_metric(
+            &mut output,
+            "omo_tuning_profile_active",
+            &[("profile", tuning_mode_label(profiles.active))],
+            1,
+        );
+        for profile in profiles.profiles {
+            labeled_metric(
+                &mut output,
+                "omo_tuning_profile_available",
+                &[("profile", tuning_mode_label(profile.name))],
+                bool_value(profile.available),
+            );
+        }
+
+        metric(
+            &mut output,
+            "omo_update_rollback_available",
+            bool_value(update.rollback_available),
+        );
+        metric(
+            &mut output,
+            "omo_update_boot_once_pending",
+            bool_value(update.boot_once_pending),
+        );
+        for slot in update.slots {
+            labeled_metric(
+                &mut output,
+                "omo_update_slot_bootable",
+                &[
+                    ("slot", &slot.name),
+                    ("state", slot_state_label(slot.state)),
+                ],
+                bool_value(slot.bootable),
+            );
+        }
+
+        for chain in self.chains() {
+            let chain_id = chain.id.to_string();
+            labeled_metric(
+                &mut output,
+                "omo_chain_up",
+                &[("chain", &chain_id)],
+                bool_value(chain.present && chain.enabled),
+            );
+            labeled_metric(
+                &mut output,
+                "omo_chain_asic_detected",
+                &[("chain", &chain_id)],
+                chain.asic_detected,
+            );
+            labeled_metric(
+                &mut output,
+                "omo_temp_board_celsius",
+                &[("chain", &chain_id)],
+                chain.temp_board_c,
+            );
+            labeled_metric(
+                &mut output,
+                "omo_temp_chip_max_celsius",
+                &[("chain", &chain_id)],
+                chain.temp_chip_max_c,
+            );
+        }
+
+        output
+    }
+}
+
+fn metric(output: &mut String, name: &str, value: impl std::fmt::Display) {
+    output.push_str(&format!("{name} {value}\n"));
+}
+
+fn labeled_metric(
+    output: &mut String,
+    name: &str,
+    labels: &[(&str, &str)],
+    value: impl std::fmt::Display,
+) {
+    let labels = labels
+        .iter()
+        .map(|(key, value)| format!(r#"{key}="{}""#, escape_label_value(value)))
+        .collect::<Vec<_>>()
+        .join(",");
+    output.push_str(&format!("{name}{{{labels}}} {value}\n"));
+}
+
+fn escape_label_value(value: &str) -> String {
+    value.replace('\\', r"\\").replace('"', "\\\"")
+}
+
+fn bool_value(value: bool) -> u8 {
+    u8::from(value)
+}
+
+fn severity_value(severity: Severity) -> u8 {
+    match severity {
+        Severity::Ok => 0,
+        Severity::Warn => 1,
+        Severity::Error => 2,
+        Severity::Critical => 3,
+    }
+}
+
+fn health_state_label(state: HealthStatus) -> &'static str {
+    match state {
+        HealthStatus::Booting => "booting",
+        HealthStatus::Recovering => "recovering",
+        HealthStatus::Idle => "idle",
+        HealthStatus::Starting => "starting",
+        HealthStatus::Mining => "mining",
+        HealthStatus::Degraded => "degraded",
+        HealthStatus::SafeMode => "safe_mode",
+        HealthStatus::Updating => "updating",
+        HealthStatus::RollbackPending => "rollback_pending",
+        HealthStatus::Fault => "fault",
+    }
+}
+
+fn miner_mode_label(mode: openmineros_common::MinerMode) -> &'static str {
+    match mode {
+        openmineros_common::MinerMode::StockLike => "stock_like",
+        openmineros_common::MinerMode::Eco => "eco",
+        openmineros_common::MinerMode::Balanced => "balanced",
+        openmineros_common::MinerMode::Performance => "performance",
+        openmineros_common::MinerMode::Manual => "manual",
+        openmineros_common::MinerMode::SafeMode => "safe_mode",
+    }
+}
+
+fn tuning_mode_label(mode: openmineros_common::TuningMode) -> &'static str {
+    match mode {
+        openmineros_common::TuningMode::StockLike => "stock_like",
+        openmineros_common::TuningMode::Eco => "eco",
+        openmineros_common::TuningMode::Balanced => "balanced",
+        openmineros_common::TuningMode::Performance => "performance",
+        openmineros_common::TuningMode::Manual => "manual",
+        openmineros_common::TuningMode::SafeMode => "safe_mode",
+    }
+}
+
+fn slot_state_label(state: openmineros_common::SlotState) -> &'static str {
+    match state {
+        openmineros_common::SlotState::Active => "active",
+        openmineros_common::SlotState::Inactive => "inactive",
+        openmineros_common::SlotState::Unknown => "unknown",
+    }
 }
 
 #[cfg(test)]
@@ -315,5 +538,35 @@ mod tests {
         assert_eq!(status.active_slot, "slot_a");
         assert_eq!(status.inactive_slot, "slot_b");
         assert!(!status.boot_once_pending);
+    }
+
+    #[test]
+    fn prometheus_metrics_do_not_expose_pool_secrets_or_addresses() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [contribution]
+            enabled = true
+            rate_percent = 1.0
+
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool.example:3333"
+            user = "acct.worker"
+            password = "super-secret"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        let supervisor =
+            Supervisor::with_config(Model::S19jPro, BoardFamily::Xilinx, config).unwrap();
+        let metrics = supervisor.prometheus_metrics();
+
+        assert!(metrics.contains("omo_miner_hashrate_ths"));
+        assert!(metrics.contains("omo_pool_configured_total 1"));
+        assert!(metrics.contains("omo_contribution_target_locked 1"));
+        assert!(!metrics.contains("super-secret"));
+        assert!(!metrics.contains("pool.example"));
+        assert!(!metrics.contains("acct.worker"));
+        assert!(!metrics.contains("bc1qp6d4vxmenug97ghcy027vsn3902yadcj77ka6j"));
     }
 }

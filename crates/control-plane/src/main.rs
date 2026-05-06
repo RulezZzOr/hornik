@@ -162,48 +162,5 @@ async fn contribution_status(
 }
 
 async fn metrics(State(supervisor): State<Arc<Supervisor>>) -> String {
-    let miner = supervisor.miner_status();
-    let contribution = supervisor.contribution_status();
-    let mut output = String::new();
-
-    output.push_str(&format!("omo_miner_hashrate_ths {}\n", miner.hashrate_ths));
-    output.push_str(&format!("omo_miner_power_watts {}\n", miner.power_w));
-    output.push_str(&format!(
-        "omo_miner_efficiency_j_th {}\n",
-        miner.efficiency_j_th
-    ));
-    output.push_str(&format!(
-        "omo_shares_accepted_total {}\n",
-        miner.accepted_shares
-    ));
-    output.push_str(&format!(
-        "omo_shares_rejected_total {}\n",
-        miner.rejected_shares
-    ));
-    output.push_str(&format!(
-        "omo_contribution_rate_percent {}\n",
-        contribution.rate_percent
-    ));
-
-    for chain in supervisor.chains() {
-        output.push_str(&format!(
-            "omo_chain_up{{chain=\"{}\"}} {}\n",
-            chain.id,
-            u8::from(chain.present && chain.enabled)
-        ));
-        output.push_str(&format!(
-            "omo_chain_asic_detected{{chain=\"{}\"}} {}\n",
-            chain.id, chain.asic_detected
-        ));
-        output.push_str(&format!(
-            "omo_temp_board_celsius{{chain=\"{}\"}} {}\n",
-            chain.id, chain.temp_board_c
-        ));
-        output.push_str(&format!(
-            "omo_temp_chip_max_celsius{{chain=\"{}\"}} {}\n",
-            chain.id, chain.temp_chip_max_c
-        ));
-    }
-
-    output
+    supervisor.prometheus_metrics()
 }

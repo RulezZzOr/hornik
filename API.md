@@ -199,3 +199,33 @@ The endpoint list is inactive while contribution is disabled.
 - `GET /metrics`
 
 Metrics use the `omo_` prefix.
+
+Build `0.1.0` exports miner, chain, health, pool, tuning, update, and
+contribution gauges/counters. Metrics intentionally do not expose pool URLs,
+pool users, pool passwords, or the contribution beneficiary address.
+
+Core metrics:
+
+```text
+omo_miner_hashrate_ths
+omo_miner_power_watts
+omo_miner_efficiency_j_th
+omo_miner_uptime_seconds
+omo_system_health_state{state="mining"}
+omo_system_health_severity
+omo_pool_configured_total
+omo_pool_enabled_total
+omo_pool_active_priority
+omo_tuning_profile_active{profile="stock_like"}
+omo_tuning_profile_available{profile="manual"}
+omo_update_rollback_available
+omo_update_boot_once_pending
+omo_update_slot_bootable{slot="slot_a",state="active"}
+omo_contribution_enabled
+omo_contribution_rate_percent
+omo_contribution_target_locked
+omo_chain_up{chain="0"}
+omo_chain_asic_detected{chain="0"}
+omo_temp_board_celsius{chain="0"}
+omo_temp_chip_max_celsius{chain="0"}
+```
