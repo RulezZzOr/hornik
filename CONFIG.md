@@ -99,6 +99,9 @@ Pool configuration affects event output:
 - no enabled pools emits `pool.unconfigured`,
 - at least one enabled pool emits `pool.active_selected`.
 
+Support bundles expose pool metadata with `password_set`, but never include
+pool passwords.
+
 ## Tuning
 
 Tuning config selects the active high-level profile.

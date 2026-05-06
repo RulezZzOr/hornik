@@ -4,7 +4,7 @@ use clap::Parser;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, EventsResponse, MinerStatus, Model, PoolSummary,
-    ProfilesResponse, RuntimeConfig, SystemInfo,
+    ProfilesResponse, RuntimeConfig, SupportBundle, SystemInfo,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/pools", get(pools))
         .route("/api/v1/profiles", get(profiles))
         .route("/api/v1/events", get(events))
+        .route("/api/v1/support/bundle", get(support_bundle))
         .route("/api/v1/contribution/status", get(contribution_status))
         .route("/metrics", get(metrics))
         .with_state(supervisor);
@@ -95,6 +96,10 @@ async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesRes
 
 async fn events(State(supervisor): State<Arc<Supervisor>>) -> Json<EventsResponse> {
     Json(supervisor.events())
+}
+
+async fn support_bundle(State(supervisor): State<Arc<Supervisor>>) -> Json<SupportBundle> {
+    Json(supervisor.support_bundle())
 }
 
 async fn contribution_status(

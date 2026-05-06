@@ -5,6 +5,7 @@ pub mod event;
 pub mod manifest;
 pub mod pool;
 pub mod status;
+pub mod support;
 pub mod tuning;
 
 pub use board::{
@@ -26,6 +27,7 @@ pub use pool::{
     PoolConfig, PoolConfigError, PoolInfo, PoolSummary, summarize_pools, validate_pools,
 };
 pub use status::{ChainStatus, HealthStatus, MinerMode, MinerStatus, Severity, SystemInfo};
+pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{
     ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningMode, TuningTargetType,
     profile_catalog,

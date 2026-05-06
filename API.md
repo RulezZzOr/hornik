@@ -7,6 +7,7 @@ All public REST endpoints are versioned under `/api/v1`.
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
 - `GET /api/v1/events`
+- `GET /api/v1/support/bundle`
 
 Events response:
 
@@ -31,6 +32,31 @@ Events response:
 
 Build `0.1.0` returns a deterministic in-memory event snapshot. Persistent
 SQLite-backed events come later.
+
+Support bundle response:
+
+```json
+{
+  "schema_version": 1,
+  "privacy": {
+    "pool_passwords_redacted": true,
+    "session_tokens_included": false,
+    "private_keys_included": false,
+    "raw_logs_included": false
+  },
+  "system": {},
+  "health": {},
+  "miner": {},
+  "chains": [],
+  "pools": {},
+  "profiles": {},
+  "contribution": {},
+  "events": {}
+}
+```
+
+Build `0.1.0` support bundles include only structured in-memory state and never
+include pool passwords, session tokens, private keys, or raw logs.
 
 ## Mining
 

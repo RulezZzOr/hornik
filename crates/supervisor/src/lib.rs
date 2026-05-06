@@ -3,7 +3,8 @@ use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
     EventsResponse, HealthStatus, MinerStatus, Model, PoolConfig, PoolSummary, ProfilesResponse,
-    RuntimeConfig, Severity, SystemInfo, TuningConfig, summarize_pools,
+    RuntimeConfig, Severity, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
+    summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -186,6 +187,22 @@ impl Supervisor {
 
         events.finish()
     }
+
+    pub fn support_bundle(&self) -> SupportBundle {
+        SupportBundle {
+            schema_version: SupportBundle::SCHEMA_VERSION,
+            generated_uptime_seconds: self.uptime_seconds(),
+            privacy: SupportBundlePrivacy::default(),
+            system: self.system_info(),
+            health: self.health(),
+            miner: self.miner_status(),
+            chains: self.chains(),
+            pools: self.pools(),
+            profiles: self.profiles(),
+            contribution: self.contribution_status(),
+            events: self.events(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -254,5 +271,29 @@ mod tests {
                 .iter()
                 .any(|event| event.event_type == "pool.unconfigured")
         );
+    }
+
+    #[test]
+    fn support_bundle_redacts_pool_passwords() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool.example:3333"
+            user = "acct.worker"
+            password = "super-secret"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+
+        let supervisor =
+            Supervisor::with_config(Model::S19jPro, BoardFamily::Xilinx, config).unwrap();
+        let bundle = supervisor.support_bundle();
+        let serialized = serde_json::to_string(&bundle).unwrap();
+
+        assert!(bundle.privacy.pool_passwords_redacted);
+        assert!(serialized.contains("\"password_set\":true"));
+        assert!(!serialized.contains("super-secret"));
     }
 }
