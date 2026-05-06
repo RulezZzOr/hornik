@@ -3,6 +3,7 @@ pub mod config;
 pub mod contribution;
 pub mod event;
 pub mod manifest;
+pub mod overview;
 pub mod pool;
 pub mod status;
 pub mod support;
@@ -24,10 +25,13 @@ pub use manifest::{
     ArtifactManifest, ManifestError, ReleaseManifest, ReleaseSignature, VerificationReport,
     verify_manifest_file,
 };
+pub use overview::DashboardOverview;
 pub use pool::{
     PoolConfig, PoolConfigError, PoolInfo, PoolSummary, summarize_pools, validate_pools,
 };
-pub use status::{ChainStatus, HealthStatus, MinerMode, MinerStatus, Severity, SystemInfo};
+pub use status::{
+    ChainStatus, HealthStatus, HealthStatusResponse, MinerMode, MinerStatus, Severity, SystemInfo,
+};
 pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{
     ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningMode, TuningTargetType,

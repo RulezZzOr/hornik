@@ -4,91 +4,725 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>OpenMinerOS</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2328563b'/%3E%3Cpath d='M4 11V5h2l2 3 2-3h2v6h-2V8L8 11 6 8v3H4z' fill='white'/%3E%3C/svg%3E"
+    />
     <style>
       :root {
-        color-scheme: light dark;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        background: #111827;
-        color: #f9fafb;
+        color-scheme: light;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        background: #f4f2ee;
+        color: #1b1f23;
       }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
+        background: #f4f2ee;
       }
+
       main {
-        max-width: 960px;
-        margin: 0 auto;
-        padding: 32px 20px;
+        min-height: 100vh;
       }
+
+      .topbar {
+        border-bottom: 1px solid #d6d1c8;
+        background: #fbfaf7;
+      }
+
+      .topbar-inner {
+        width: min(1180px, calc(100% - 32px));
+        min-height: 72px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .brand {
+        min-width: 0;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
       h1 {
-        margin: 0 0 8px;
-        font-size: 32px;
+        font-size: 24px;
+        line-height: 1.15;
         letter-spacing: 0;
       }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 12px;
-        margin-top: 24px;
-      }
-      .card {
-        border: 1px solid #374151;
-        border-radius: 8px;
-        padding: 16px;
-        background: #1f2937;
-      }
-      .label {
-        color: #9ca3af;
+
+      .subtitle {
+        margin-top: 4px;
+        color: #687078;
         font-size: 13px;
-        margin-bottom: 6px;
       }
+
+      .status-pill {
+        min-width: 132px;
+        height: 36px;
+        border: 1px solid #b9c7bd;
+        border-radius: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 12px;
+        background: #eaf3eb;
+        color: #28563b;
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .status-pill.ok {
+        border-color: #b9c7bd;
+        background: #eaf3eb;
+        color: #28563b;
+      }
+
+      .status-pill.warn {
+        border-color: #ead68f;
+        background: #fff0c9;
+        color: #78550e;
+      }
+
+      .status-pill.error {
+        border-color: #e9b3aa;
+        background: #fde4df;
+        color: #883327;
+      }
+
+      .content {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 24px 0 40px;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .panel-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+        gap: 16px;
+        margin-top: 16px;
+        align-items: start;
+      }
+
+      .panel-stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .card,
+      .panel {
+        border: 1px solid #d6d1c8;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .card {
+        min-height: 112px;
+        padding: 16px;
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .label {
+        color: #687078;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
       .value {
-        font-size: 22px;
+        margin-top: 10px;
+        color: #171b1f;
+        font-size: 28px;
+        line-height: 1.08;
+        font-weight: 760;
+        overflow-wrap: anywhere;
+      }
+
+      .meta {
+        margin-top: 8px;
+        color: #687078;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .panel-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+
+      h2 {
+        font-size: 16px;
+        line-height: 1.2;
+        letter-spacing: 0;
+      }
+
+      .table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .table th,
+      .table td {
+        border-top: 1px solid #ebe7df;
+        padding: 11px 8px;
+        text-align: left;
+        font-size: 13px;
+        vertical-align: middle;
+      }
+
+      .table th {
+        color: #687078;
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .table td {
+        color: #262a2f;
+      }
+
+      .state {
+        display: inline-flex;
+        min-height: 24px;
+        align-items: center;
+        border-radius: 6px;
+        padding: 3px 7px;
+        background: #ece8df;
+        color: #3b3f44;
+        font-size: 12px;
         font-weight: 700;
       }
-      code {
-        color: #a7f3d0;
+
+      .state.ok {
+        background: #e0f0e4;
+        color: #23533a;
+      }
+
+      .state.warn {
+        background: #fff0c9;
+        color: #78550e;
+      }
+
+      .state.error {
+        background: #fde4df;
+        color: #883327;
+      }
+
+      .kv {
+        display: grid;
+        gap: 10px;
+      }
+
+      .kv-row {
+        display: grid;
+        grid-template-columns: 130px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        border-top: 1px solid #ebe7df;
+        padding-top: 10px;
+        font-size: 13px;
+      }
+
+      .kv-key {
+        color: #687078;
+        font-weight: 700;
+      }
+
+      .kv-value {
+        color: #262a2f;
+        overflow-wrap: anywhere;
+      }
+
+      .events {
+        display: grid;
+        gap: 10px;
+      }
+
+      .event {
+        border-top: 1px solid #ebe7df;
+        padding-top: 10px;
+      }
+
+      .event-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+        font-weight: 740;
+      }
+
+      .event-message {
+        margin-top: 4px;
+        color: #687078;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .empty {
+        border-top: 1px solid #ebe7df;
+        padding-top: 12px;
+        color: #687078;
+        font-size: 13px;
+      }
+
+      @media (max-width: 900px) {
+        .summary-grid,
+        .panel-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .topbar-inner {
+          align-items: flex-start;
+          flex-direction: column;
+          padding: 16px 0;
+        }
+
+        .status-pill {
+          width: 100%;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .content,
+        .topbar-inner {
+          width: min(100% - 20px, 1180px);
+        }
+
+        .panel,
+        .card {
+          padding: 14px;
+        }
+
+        .table {
+          display: block;
+          overflow-x: auto;
+          white-space: nowrap;
+        }
+
+        .value {
+          font-size: 24px;
+        }
+
+        .kv-row {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
       }
     </style>
   </head>
   <body>
     <main>
-      <h1>OpenMinerOS</h1>
-      <p>Local development status for build <code>0.1.0</code>.</p>
-      <section class="grid">
-        <div class="card">
-          <div class="label">State</div>
-          <div id="state" class="value">loading</div>
+      <header class="topbar">
+        <div class="topbar-inner">
+          <div class="brand">
+            <h1>OpenMinerOS</h1>
+            <p class="subtitle" id="identity">build 0.1.0</p>
+          </div>
+          <div class="status-pill" id="live-state">connecting</div>
         </div>
-        <div class="card">
-          <div class="label">Board</div>
-          <div id="board" class="value">loading</div>
-        </div>
-        <div class="card">
-          <div class="label">Hashrate</div>
-          <div id="hashrate" class="value">loading</div>
-        </div>
-        <div class="card">
-          <div class="label">Contribution</div>
-          <div id="contribution" class="value">loading</div>
-        </div>
-      </section>
+      </header>
+
+      <div class="content">
+        <section class="summary-grid" aria-label="Miner summary">
+          <div class="card">
+            <div class="label">Hashrate</div>
+            <div class="value" id="hashrate">--</div>
+            <div class="meta" id="shares">--</div>
+          </div>
+          <div class="card">
+            <div class="label">Power</div>
+            <div class="value" id="power">--</div>
+            <div class="meta" id="efficiency">--</div>
+          </div>
+          <div class="card">
+            <div class="label">Health</div>
+            <div class="value" id="health">--</div>
+            <div class="meta" id="health-meta">--</div>
+          </div>
+          <div class="card">
+            <div class="label">Contribution</div>
+            <div class="value" id="contribution">--</div>
+            <div class="meta" id="contribution-meta">--</div>
+          </div>
+        </section>
+
+        <section class="panel-grid">
+          <div class="panel-stack">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Hashboards</h2>
+                <span class="state" id="chain-count">--</span>
+              </div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Chain</th>
+                    <th>Status</th>
+                    <th>ASICs</th>
+                    <th>Board C</th>
+                    <th>Chip C</th>
+                    <th>Fault</th>
+                  </tr>
+                </thead>
+                <tbody id="chains"></tbody>
+              </table>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Pools</h2>
+                <span class="state" id="pool-count">--</span>
+              </div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Priority</th>
+                    <th>URL</th>
+                    <th>User</th>
+                    <th>Status</th>
+                    <th>Password</th>
+                  </tr>
+                </thead>
+                <tbody id="pools"></tbody>
+              </table>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Events</h2>
+                <span class="state" id="event-count">--</span>
+              </div>
+              <div class="events" id="events"></div>
+            </section>
+          </div>
+
+          <div class="panel-stack">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>System</h2>
+                <span class="state ok" id="slot">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Target</div>
+                  <div class="kv-value" id="target">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Firmware</div>
+                  <div class="kv-value" id="firmware">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Uptime</div>
+                  <div class="kv-value" id="uptime">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Capabilities</div>
+                  <div class="kv-value" id="capabilities">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Tuning</h2>
+                <span class="state" id="tuning-mode">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Target</div>
+                  <div class="kv-value" id="tuning-target">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Autotune</div>
+                  <div class="kv-value" id="autotune">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Profiles</div>
+                  <div class="kv-value" id="profiles">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Update Slots</h2>
+                <span class="state" id="rollback">--</span>
+              </div>
+              <div class="kv" id="slots"></div>
+            </section>
+          </div>
+        </section>
+      </div>
     </main>
+
     <script>
+      const state = {
+        lastOverview: null,
+        events: [],
+      };
+
+      const byId = (id) => document.getElementById(id);
+      const text = (id, value) => {
+        byId(id).textContent = value;
+      };
+      const fixed = (value, digits = 1) =>
+        Number.isFinite(value) ? value.toFixed(digits) : "--";
+      const bool = (value) => (value ? "yes" : "no");
+      const formatSeconds = (seconds) => {
+        if (!Number.isFinite(seconds)) return "--";
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        return `${minutes}m`;
+      };
+      const classifySeverity = (severity) => {
+        if (severity === "ok" || severity === "info") return "ok";
+        if (severity === "warn") return "warn";
+        if (severity === "error" || severity === "critical") return "error";
+        return "";
+      };
+      const badge = (label, className = "") =>
+        `<span class="state ${className}">${escapeHtml(label)}</span>`;
+      const escapeHtml = (value) =>
+        String(value ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+
       async function refresh() {
-        const [info, health, miner, contribution] = await Promise.all([
-          fetch("/api/v1/system/info").then((r) => r.json()),
-          fetch("/api/v1/system/health").then((r) => r.json()),
-          fetch("/api/v1/miner/status").then((r) => r.json()),
-          fetch("/api/v1/contribution/status").then((r) => r.json()),
-        ]);
-        document.querySelector("#state").textContent = health.state;
-        document.querySelector("#board").textContent = `${info.model} / ${info.board_family}`;
-        document.querySelector("#hashrate").textContent = `${miner.hashrate_ths.toFixed(1)} TH/s`;
-        document.querySelector("#contribution").textContent = `${contribution.rate_percent.toFixed(1)}%`;
+        const response = await fetch("/api/v1/overview", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`overview failed: ${response.status}`);
+        }
+        const overview = await response.json();
+        state.lastOverview = overview;
+        state.events = uniqueEvents(overview.events.events.slice().reverse()).slice(0, 8);
+        render(overview);
       }
-      refresh();
-      setInterval(refresh, 5000);
+
+      function render(overview) {
+        renderTopbar(overview);
+        renderSummary(overview);
+        renderChains(overview.chains);
+        renderPools(overview.pools);
+        renderSystem(overview);
+        renderTuning(overview.profiles);
+        renderSlots(overview.update);
+        renderEvents();
+      }
+
+      function renderTopbar(overview) {
+        const system = overview.system;
+        text(
+          "identity",
+          `${system.model} / ${system.board_family} / build ${system.firmware_version}`,
+        );
+        const live = byId("live-state");
+        live.textContent = overview.health.state;
+        live.className = `status-pill ${classifySeverity(overview.health.severity)}`;
+      }
+
+      function renderSummary(overview) {
+        const miner = overview.miner;
+        const contribution = overview.contribution;
+        text("hashrate", `${fixed(miner.hashrate_ths)} TH/s`);
+        text(
+          "shares",
+          `${miner.accepted_shares} accepted / ${miner.rejected_shares} rejected`,
+        );
+        text("power", `${miner.power_w} W`);
+        text("efficiency", `${fixed(miner.efficiency_j_th)} J/TH`);
+        text("health", overview.health.severity);
+        text(
+          "health-meta",
+          overview.health.issues.length
+            ? overview.health.issues.join(", ")
+            : `state ${overview.health.state}`,
+        );
+        text("contribution", `${fixed(contribution.rate_percent)}%`);
+        text(
+          "contribution-meta",
+          contribution.enabled
+            ? `${formatSeconds(contribution.today_scheduled_seconds)} scheduled, target locked`
+            : "disabled, target locked",
+        );
+      }
+
+      function renderChains(chains) {
+        text("chain-count", `${chains.length} chains`);
+        byId("chains").innerHTML = chains
+          .map((chain) => {
+            const up = chain.present && chain.enabled && !chain.fault;
+            return `<tr>
+              <td>${chain.id}</td>
+              <td>${badge(up ? "up" : "check", up ? "ok" : "warn")}</td>
+              <td>${chain.asic_detected}</td>
+              <td>${fixed(chain.temp_board_c)} C</td>
+              <td>${fixed(chain.temp_chip_max_c)} C</td>
+              <td>${escapeHtml(chain.fault || "none")}</td>
+            </tr>`;
+          })
+          .join("");
+      }
+
+      function renderPools(summary) {
+        text("pool-count", `${summary.enabled}/${summary.configured} enabled`);
+        if (summary.pools.length === 0) {
+          byId("pools").innerHTML = `<tr><td colspan="5">No configured pools</td></tr>`;
+          return;
+        }
+        byId("pools").innerHTML = summary.pools
+          .map(
+            (pool) => `<tr>
+              <td>${pool.priority}</td>
+              <td>${escapeHtml(pool.url)}</td>
+              <td>${escapeHtml(pool.user || "--")}</td>
+              <td>${badge(pool.active ? "active" : pool.enabled ? "enabled" : "disabled", pool.active ? "ok" : "")}</td>
+              <td>${pool.password_set ? "set" : "empty"}</td>
+            </tr>`,
+          )
+          .join("");
+      }
+
+      function renderSystem(overview) {
+        const system = overview.system;
+        text("slot", system.active_slot);
+        text("target", `${system.model} on ${system.board_family}`);
+        text("firmware", system.firmware_version);
+        text("uptime", formatSeconds(system.uptime_seconds));
+        text("capabilities", system.capabilities.flags.join(", ") || "--");
+      }
+
+      function renderTuning(profiles) {
+        text("tuning-mode", profiles.active);
+        text(
+          "tuning-target",
+          profiles.target_value === null
+            ? profiles.target_type
+            : `${profiles.target_type} ${profiles.target_value}`,
+        );
+        text("autotune", bool(profiles.autotune));
+        text(
+          "profiles",
+          profiles.profiles
+            .filter((profile) => profile.available)
+            .map((profile) => profile.name)
+            .join(", "),
+        );
+      }
+
+      function renderSlots(update) {
+        text("rollback", update.rollback_available ? "rollback ready" : "no rollback");
+        byId("slots").innerHTML = update.slots
+          .map(
+            (slot) => `<div class="kv-row">
+              <div class="kv-key">${escapeHtml(slot.name)}</div>
+              <div class="kv-value">
+                ${badge(slot.state, slot.state === "active" ? "ok" : "")}
+                ${slot.bootable ? "bootable" : "not bootable"}
+                ${slot.version ? ` / ${escapeHtml(slot.version)}` : ""}
+              </div>
+            </div>`,
+          )
+          .join("");
+      }
+
+      function renderEvents() {
+        text("event-count", `${state.events.length} shown`);
+        if (state.events.length === 0) {
+          byId("events").innerHTML = `<div class="empty">No events</div>`;
+          return;
+        }
+        byId("events").innerHTML = state.events
+          .map(
+            (event) => `<div class="event">
+              <div class="event-title">
+                <span>${escapeHtml(event.event_type)}</span>
+                ${badge(event.severity, classifySeverity(event.severity))}
+              </div>
+              <div class="event-message">${escapeHtml(event.message)}</div>
+            </div>`,
+          )
+          .join("");
+      }
+
+      function eventKey(event) {
+        return `${event.event_type}|${event.component}|${event.message}`;
+      }
+
+      function uniqueEvents(events) {
+        const seen = new Set();
+        return events.filter((event) => {
+          const key = eventKey(event);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+
+      function connectEvents() {
+        const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+        const socket = new WebSocket(`${protocol}//${location.host}/api/v1/ws`);
+        socket.addEventListener("open", () => {
+          text("live-state", "live");
+        });
+        socket.addEventListener("message", (message) => {
+          const envelope = JSON.parse(message.data);
+          if (envelope.type === "system.heartbeat") {
+            text("live-state", "live");
+            return;
+          }
+          const record = envelope.payload;
+          state.events = uniqueEvents([record, ...state.events]).slice(0, 8);
+          renderEvents();
+        });
+        socket.addEventListener("close", () => {
+          text("live-state", "offline");
+          window.setTimeout(connectEvents, 3000);
+        });
+      }
+
+      refresh()
+        .then(connectEvents)
+        .catch((error) => {
+          text("live-state", "api error");
+          text("health-meta", error.message);
+        });
+      window.setInterval(() => {
+        refresh().catch((error) => {
+          text("live-state", "api error");
+          text("health-meta", error.message);
+        });
+      }, 5000);
     </script>
   </body>
 </html>
-

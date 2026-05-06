@@ -208,6 +208,21 @@ impl Supervisor {
         UpdateStatus::development_default(self.active_slot.clone(), env!("CARGO_PKG_VERSION"))
     }
 
+    pub fn dashboard_overview(&self) -> openmineros_common::DashboardOverview {
+        openmineros_common::DashboardOverview {
+            schema_version: openmineros_common::DashboardOverview::SCHEMA_VERSION,
+            system: self.system_info(),
+            health: self.health(),
+            miner: self.miner_status(),
+            chains: self.chains(),
+            pools: self.pools(),
+            profiles: self.profiles(),
+            contribution: self.contribution_status(),
+            update: self.update_status(),
+            events: self.events(),
+        }
+    }
+
     pub fn prometheus_metrics(&self) -> String {
         let system = self.system_info();
         let health = self.health();
@@ -538,6 +553,46 @@ mod tests {
         assert_eq!(status.active_slot, "slot_a");
         assert_eq!(status.inactive_slot, "slot_b");
         assert!(!status.boot_once_pending);
+    }
+
+    #[test]
+    fn dashboard_overview_redacts_pool_passwords() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [contribution]
+            enabled = true
+            rate_percent = 1.5
+
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://pool.example:3333"
+            user = "acct.worker"
+            password = "super-secret"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        let supervisor =
+            Supervisor::with_config(Model::S19jPro, BoardFamily::Xilinx, config).unwrap();
+        let overview = supervisor.dashboard_overview();
+        let serialized = serde_json::to_string(&overview).unwrap();
+
+        assert_eq!(
+            overview.schema_version,
+            openmineros_common::DashboardOverview::SCHEMA_VERSION
+        );
+        assert_eq!(overview.pools.enabled, 1);
+        assert!(overview.contribution.target_locked);
+        assert!(overview.update.rollback_available);
+        assert!(
+            overview
+                .events
+                .events
+                .iter()
+                .any(|event| event.event_type == "pool.active_selected")
+        );
+        assert!(serialized.contains("\"password_set\":true"));
+        assert!(!serialized.contains("super-secret"));
     }
 
     #[test]

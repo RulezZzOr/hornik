@@ -10,7 +10,7 @@ Build `0.1.0` is a safe development baseline:
 - Board identity support for Xilinx/Zynq, BeagleBone Black, Amlogic, and CVitek.
 - S19-class model matrix with explicit support levels.
 - Simulated ASIC backend for local API and UI development.
-- REST endpoints for system info, health, miner status, chains, contribution status, and Prometheus metrics.
+- REST endpoints for dashboard overview, system info, health, miner status, chains, contribution status, and Prometheus metrics.
 - Validated user pool config with redacted pool status API.
 - Validated tuning profile config with read-only profile API.
 - Deterministic in-memory event snapshot API.
@@ -50,6 +50,7 @@ They are intentionally not flashable firmware images.
 ## API
 
 - `GET /api/v1/system/info`
+- `GET /api/v1/overview`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
 - `GET /api/v1/chains`

@@ -4,11 +4,34 @@ All public REST endpoints are versioned under `/api/v1`.
 
 ## System
 
+- `GET /api/v1/overview`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
 - `GET /api/v1/events`
 - `GET /api/v1/ws`
 - `GET /api/v1/support/bundle`
+
+Overview response:
+
+```json
+{
+  "schema_version": 1,
+  "system": {},
+  "health": {},
+  "miner": {},
+  "chains": [],
+  "pools": {},
+  "profiles": {},
+  "contribution": {},
+  "update": {},
+  "events": {}
+}
+```
+
+The overview endpoint is the primary dashboard read model. It combines the
+same redacted runtime state exposed by the narrower endpoints and does not
+include pool passwords, session tokens, private keys, or hidden contribution
+targets.
 
 Events response:
 
