@@ -3,7 +3,7 @@ MODEL ?= s19j-pro
 VERSION ?= 0.1.0
 DIST_DIR ?= dist
 
-.PHONY: bootstrap fmt clippy test run-control-plane image verify-repro clean
+.PHONY: bootstrap fmt clippy test release size-budget run-control-plane image verify-repro clean
 
 bootstrap:
 	cargo fetch
@@ -17,6 +17,12 @@ clippy:
 test:
 	cargo test --workspace
 
+release:
+	cargo build --workspace --release
+
+size-budget: release
+	./scripts/check-size-budget.sh
+
 run-control-plane:
 	cargo run -p openmineros-control-plane -- --board $(BOARD) --model $(MODEL)
 
@@ -29,4 +35,3 @@ verify-repro:
 clean:
 	cargo clean
 	rm -rf "$(DIST_DIR)"
-
