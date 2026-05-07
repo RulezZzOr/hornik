@@ -10,6 +10,7 @@ Build `0.1.0` is a safe development baseline:
 - Board identity support for Xilinx/Zynq, BeagleBone Black, Amlogic, and CVitek.
 - S19-class model matrix with explicit support levels.
 - Read-only hardware identity report for configured vs inferred S19 target.
+- Central hardware safety gate for mining, flashing, tuning, and ASIC writes.
 - Simulated ASIC backend for local API and UI development.
 - REST endpoints for dashboard overview, system info, health, miner status, chains, contribution status, and Prometheus metrics.
 - Validated user pool config with redacted pool status API.
@@ -59,6 +60,7 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/overview`
 - `GET /api/v1/hardware/targets`
 - `GET /api/v1/hardware/identity`
+- `GET /api/v1/hardware/safety`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
@@ -82,6 +84,8 @@ read-only and reports zero hashrate until ASIC bus probing is implemented.
 GPIO, UART, fan, voltage, clock, pool, or ASIC commands.
 `GET /api/v1/hardware/identity` compares the configured board/model with
 read-only evidence and never auto-switches the target in build `0.1.0`.
+`GET /api/v1/hardware/safety` keeps real hardware mining, flashing, tuning
+writes, and ASIC bus writes disabled until the backend implements those paths.
 
 ```bash
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro

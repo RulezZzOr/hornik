@@ -539,6 +539,27 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Hardware Safety</h2>
+                <span class="state" id="safety-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Mining</div>
+                  <div class="kv-value" id="safety-mining">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Writes</div>
+                  <div class="kv-value" id="safety-writes">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Reason</div>
+                  <div class="kv-value" id="safety-reason">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Job Pipeline</h2>
                 <span class="state" id="job-pipeline-state">--</span>
               </div>
@@ -737,6 +758,7 @@
         renderStratum(overview.stratum);
         renderSystem(overview);
         renderIdentity(overview.identity);
+        renderSafety(overview.safety);
         renderTuning(overview.profiles);
         renderTuningPlan(overview.tuning_plan);
         renderSlots(overview.update);
@@ -920,6 +942,23 @@
         text(
           "identity-evidence",
           `${identity.evidence.length} read-only matches / auto-switch off`,
+        );
+      }
+
+      function renderSafety(safety) {
+        if (!safety) return;
+        text("safety-state", safety.state);
+        text(
+          "safety-mining",
+          `sim ${bool(safety.simulated_mining_allowed)} / hw ${bool(safety.hardware_mining_allowed)}`,
+        );
+        text(
+          "safety-writes",
+          `asic ${bool(safety.asic_bus_writes_allowed)} / tuning ${bool(safety.tuning_writes_allowed)} / flash ${bool(safety.flashing_allowed)}`,
+        );
+        text(
+          "safety-reason",
+          safety.reasons.length ? safety.reasons[0] : "--",
         );
       }
 

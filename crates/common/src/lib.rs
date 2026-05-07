@@ -8,6 +8,7 @@ pub mod manifest;
 pub mod overview;
 pub mod pool;
 pub mod probe;
+pub mod safety;
 pub mod status;
 pub mod stratum;
 pub mod support;
@@ -42,6 +43,7 @@ pub use pool::{
     PoolSummary, plan_pool_strategy, summarize_pool_runtime, summarize_pools, validate_pools,
 };
 pub use probe::{HardwareProbeReport, HardwareProbeSummary, ProbeCheck, ProbeStatus};
+pub use safety::{HardwareSafetyGate, HardwareSafetyState, evaluate_hardware_safety};
 pub use status::{
     ChainStatus, HealthStatus, HealthStatusResponse, MinerMode, MinerStatus, RuntimeBackendMode,
     RuntimeBackendModeParseError, Severity, SystemInfo,

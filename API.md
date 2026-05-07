@@ -7,6 +7,7 @@ All public REST endpoints are versioned under `/api/v1`.
 - `GET /api/v1/overview`
 - `GET /api/v1/hardware/targets`
 - `GET /api/v1/hardware/identity`
+- `GET /api/v1/hardware/safety`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
@@ -25,6 +26,7 @@ Overview response:
     "backend": "simulated"
   },
   "identity": {},
+  "safety": {},
   "health": {},
   "miner": {},
   "job_pipeline": {},
@@ -114,6 +116,27 @@ only classifies read-only evidence as `configured_only`, `inferred`,
 `conflict`, or `unknown`. A conflict means the configured board/model stays
 active and hardware actions remain guarded until an operator reviews it.
 
+Hardware safety gate:
+
+```json
+{
+  "state": "hardware_probe_read_only",
+  "configured_target_accepted": true,
+  "identity_confirmed": false,
+  "simulated_mining_allowed": false,
+  "hardware_mining_allowed": false,
+  "asic_bus_writes_allowed": false,
+  "tuning_writes_allowed": false,
+  "flashing_allowed": false,
+  "reasons": ["hardware-probe backend is read-only"]
+}
+```
+
+The safety gate is the central contract for hardware actions. Build `0.1.0`
+allows synthetic mining state only in the simulated backend. Hardware mining,
+ASIC bus writes, tuning writes, and flashing remain disabled on real/probe
+targets. Identity conflicts and unsupported targets block all actions.
+
 Hardware probe report:
 
 ```json
@@ -202,6 +225,7 @@ Support bundle response:
   },
   "system": {},
   "identity": {},
+  "safety": {},
   "health": {},
   "miner": {},
   "job_pipeline": {},
@@ -530,6 +554,10 @@ omo_miner_efficiency_j_th
 omo_miner_uptime_seconds
 omo_hardware_identity_evidence_total
 omo_hardware_identity_conflict
+omo_hardware_safety_configured_target_accepted
+omo_hardware_safety_hardware_mining_allowed
+omo_hardware_safety_asic_bus_writes_allowed
+omo_hardware_safety_flashing_allowed
 omo_job_notify_to_dispatch_budget_ms
 omo_job_stale_retirement_ms
 omo_job_max_pending_jobs

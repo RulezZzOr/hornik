@@ -13,10 +13,10 @@ use openmineros_common::StratumSubmitPolicy;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
-    HardwareIdentityReport, HardwareProbeReport, JobPipelinePolicy, MinerStatus, Model,
-    PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode, RuntimeConfig,
-    StratumEngineStatus, SupportBundle, SystemInfo, TargetCatalog, TuningPlanResponse,
-    UpdateStatus, target_catalog,
+    HardwareIdentityReport, HardwareProbeReport, HardwareSafetyGate, JobPipelinePolicy,
+    MinerStatus, Model, PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode,
+    RuntimeConfig, StratumEngineStatus, SupportBundle, SystemInfo, TargetCatalog,
+    TuningPlanResponse, UpdateStatus, target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/overview", get(overview))
         .route("/api/v1/hardware/targets", get(hardware_targets))
         .route("/api/v1/hardware/identity", get(hardware_identity))
+        .route("/api/v1/hardware/safety", get(hardware_safety))
         .route("/api/v1/hardware/probe", get(hardware_probe))
         .route("/api/v1/system/info", get(system_info))
         .route("/api/v1/system/health", get(system_health))
@@ -113,6 +114,10 @@ async fn hardware_identity(
     State(supervisor): State<Arc<Supervisor>>,
 ) -> Json<HardwareIdentityReport> {
     Json(supervisor.hardware_identity_report())
+}
+
+async fn hardware_safety(State(supervisor): State<Arc<Supervisor>>) -> Json<HardwareSafetyGate> {
+    Json(supervisor.hardware_safety_gate())
 }
 
 async fn hardware_probe(State(supervisor): State<Arc<Supervisor>>) -> Json<HardwareProbeReport> {

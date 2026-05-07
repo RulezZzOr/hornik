@@ -50,6 +50,18 @@ Possible identity states:
 - `conflict`: detected evidence disagrees with configured board/model,
 - `unknown`: no supported S19 identity evidence was found.
 
+## Hardware Safety
+
+The hardware safety gate centralizes whether actions are allowed. In build
+`0.1.0`:
+
+- simulated mining is allowed only in the simulated backend,
+- real hardware mining is disabled,
+- ASIC bus writes are disabled,
+- tuning writes are disabled,
+- flashing is disabled,
+- identity conflicts and unsupported targets block all hardware actions.
+
 ## Contribution
 
 ```toml

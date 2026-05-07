@@ -2,12 +2,12 @@ use openmineros_asic_backend::{BackendError, BackendHandle};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
-    EventsResponse, HardwareIdentityReport, HardwareProbeReport, HealthStatus, JobPipelinePolicy,
-    MinerStatus, Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary, PoolStrategyResponse,
-    PoolSummary, ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity,
-    StratumEngineStatus, StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo,
-    TuningConfig, TuningPlanResponse, UpdateStatus, plan_pool_strategy, summarize_pool_runtime,
-    summarize_pools,
+    EventsResponse, HardwareIdentityReport, HardwareProbeReport, HardwareSafetyGate, HealthStatus,
+    JobPipelinePolicy, MinerStatus, Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary,
+    PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode, RuntimeConfig,
+    Severity, StratumEngineStatus, StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy,
+    SystemInfo, TuningConfig, TuningPlanResponse, UpdateStatus, evaluate_hardware_safety,
+    plan_pool_strategy, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -117,6 +117,14 @@ impl Supervisor {
         self.backend.identity_report()
     }
 
+    pub fn hardware_safety_gate(&self) -> HardwareSafetyGate {
+        evaluate_hardware_safety(
+            self.backend.mode(),
+            self.backend.support(),
+            &self.hardware_identity_report(),
+        )
+    }
+
     pub fn contribution_status(&self) -> ContributionStatus {
         ContributionStatus::from(self.contribution)
     }
@@ -157,6 +165,7 @@ impl Supervisor {
         let mut events = EventBuilder::new(self.uptime_seconds());
         let system_info = self.system_info();
         let identity = self.hardware_identity_report();
+        let safety = self.hardware_safety_gate();
         let health = self.health();
         let pools = self.pools();
         let pool_runtime = self.pool_runtime();
@@ -195,6 +204,27 @@ impl Supervisor {
                 "detected_model": identity.detected_model,
                 "evidence_count": identity.evidence.len(),
                 "safe_read_only": identity.safe_read_only,
+            }),
+        );
+
+        events.push(
+            if safety.hardware_mining_allowed || safety.simulated_mining_allowed {
+                EventSeverity::Info
+            } else {
+                EventSeverity::Warn
+            },
+            "hardware.safety_gate_evaluated",
+            "hardware",
+            "hardware action safety gate evaluated",
+            json!({
+                "state": safety.state,
+                "configured_target_accepted": safety.configured_target_accepted,
+                "identity_confirmed": safety.identity_confirmed,
+                "simulated_mining_allowed": safety.simulated_mining_allowed,
+                "hardware_mining_allowed": safety.hardware_mining_allowed,
+                "asic_bus_writes_allowed": safety.asic_bus_writes_allowed,
+                "tuning_writes_allowed": safety.tuning_writes_allowed,
+                "flashing_allowed": safety.flashing_allowed,
             }),
         );
 
@@ -365,6 +395,7 @@ impl Supervisor {
             privacy: SupportBundlePrivacy::default(),
             system: self.system_info(),
             identity: self.hardware_identity_report(),
+            safety: self.hardware_safety_gate(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -389,6 +420,7 @@ impl Supervisor {
             schema_version: openmineros_common::DashboardOverview::SCHEMA_VERSION,
             system: self.system_info(),
             identity: self.hardware_identity_report(),
+            safety: self.hardware_safety_gate(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -408,6 +440,7 @@ impl Supervisor {
     pub fn prometheus_metrics(&self) -> String {
         let system = self.system_info();
         let identity = self.hardware_identity_report();
+        let safety = self.hardware_safety_gate();
         let health = self.health();
         let miner = self.miner_status();
         let job_pipeline = self.job_pipeline();
@@ -442,6 +475,26 @@ impl Supervisor {
             &mut output,
             "omo_hardware_identity_conflict",
             bool_value(identity.state == openmineros_common::HardwareIdentityState::Conflict),
+        );
+        metric(
+            &mut output,
+            "omo_hardware_safety_configured_target_accepted",
+            bool_value(safety.configured_target_accepted),
+        );
+        metric(
+            &mut output,
+            "omo_hardware_safety_hardware_mining_allowed",
+            bool_value(safety.hardware_mining_allowed),
+        );
+        metric(
+            &mut output,
+            "omo_hardware_safety_asic_bus_writes_allowed",
+            bool_value(safety.asic_bus_writes_allowed),
+        );
+        metric(
+            &mut output,
+            "omo_hardware_safety_flashing_allowed",
+            bool_value(safety.flashing_allowed),
         );
         metric(
             &mut output,
