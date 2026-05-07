@@ -43,6 +43,7 @@ pub struct StratumEngineStatus {
     pub shares_accepted: u64,
     pub shares_rejected: u64,
     pub share_validation: ShareValidationMode,
+    pub submit_policy: StratumSubmitPolicy,
     pub notes: Vec<String>,
 }
 
@@ -63,6 +64,7 @@ impl StratumEngineStatus {
             shares_accepted: 0,
             shares_rejected: 0,
             share_validation: ShareValidationMode::PlannedLocalPrecheck,
+            submit_policy: StratumSubmitPolicy::from(job_pipeline),
             notes: vec![
                 "build 0.1.0 exposes the Stratum V1 contract without opening pool sockets"
                     .to_string(),
@@ -74,6 +76,172 @@ impl StratumEngineStatus {
                     .to_string(),
             ],
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StratumSubmitPolicy {
+    pub enabled_in_build: bool,
+    pub local_precheck_required: bool,
+    pub require_socket_open: bool,
+    pub require_subscribed: bool,
+    pub require_authorized: bool,
+    pub require_active_job: bool,
+    pub require_current_difficulty: bool,
+    pub require_matching_job_id: bool,
+    pub require_hex_extranonce2: bool,
+    pub require_hex_ntime: bool,
+    pub require_hex_nonce: bool,
+    pub ntime_hex_len: usize,
+    pub nonce_hex_len: usize,
+    pub max_submit_queue_depth: u8,
+}
+
+impl From<&JobPipelinePolicy> for StratumSubmitPolicy {
+    fn from(job_pipeline: &JobPipelinePolicy) -> Self {
+        Self {
+            enabled_in_build: false,
+            local_precheck_required: true,
+            require_socket_open: true,
+            require_subscribed: true,
+            require_authorized: true,
+            require_active_job: true,
+            require_current_difficulty: true,
+            require_matching_job_id: true,
+            require_hex_extranonce2: true,
+            require_hex_ntime: true,
+            require_hex_nonce: true,
+            ntime_hex_len: 8,
+            nonce_hex_len: 8,
+            max_submit_queue_depth: job_pipeline.max_pending_jobs,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StratumShareCandidate {
+    pub worker: String,
+    pub job_id: String,
+    pub extranonce2: String,
+    pub ntime: String,
+    pub nonce: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SharePrecheckVerdict {
+    AcceptedForSubmit,
+    RejectedInvalidField,
+    RejectedSocketClosed,
+    RejectedNotSubscribed,
+    RejectedNotAuthorized,
+    RejectedNoActiveJob,
+    RejectedStaleJob,
+    RejectedDifficultyMissing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharePrecheckResult {
+    pub verdict: SharePrecheckVerdict,
+    pub submit_allowed: bool,
+    pub reasons: Vec<String>,
+}
+
+pub fn precheck_share_submit(
+    candidate: &StratumShareCandidate,
+    status: &StratumEngineStatus,
+) -> SharePrecheckResult {
+    let policy = &status.submit_policy;
+
+    if candidate.worker.trim().is_empty() {
+        return rejected(
+            SharePrecheckVerdict::RejectedInvalidField,
+            "worker must not be empty",
+        );
+    }
+    if candidate.job_id.trim().is_empty() {
+        return rejected(
+            SharePrecheckVerdict::RejectedInvalidField,
+            "job_id must not be empty",
+        );
+    }
+    if policy.require_hex_extranonce2
+        && validate_hex(&candidate.extranonce2, "extranonce2").is_err()
+    {
+        return rejected(
+            SharePrecheckVerdict::RejectedInvalidField,
+            "extranonce2 must be non-empty even-length hex",
+        );
+    }
+    if policy.require_hex_ntime
+        && validate_fixed_hex(&candidate.ntime, policy.ntime_hex_len).is_err()
+    {
+        return rejected(
+            SharePrecheckVerdict::RejectedInvalidField,
+            "ntime must be 8 hex characters",
+        );
+    }
+    if policy.require_hex_nonce
+        && validate_fixed_hex(&candidate.nonce, policy.nonce_hex_len).is_err()
+    {
+        return rejected(
+            SharePrecheckVerdict::RejectedInvalidField,
+            "nonce must be 8 hex characters",
+        );
+    }
+    if policy.require_socket_open && !status.socket_open {
+        return rejected(
+            SharePrecheckVerdict::RejectedSocketClosed,
+            "stratum socket is not open",
+        );
+    }
+    if policy.require_subscribed && !status.subscribed {
+        return rejected(
+            SharePrecheckVerdict::RejectedNotSubscribed,
+            "stratum session is not subscribed",
+        );
+    }
+    if policy.require_authorized && !status.authorized {
+        return rejected(
+            SharePrecheckVerdict::RejectedNotAuthorized,
+            "stratum worker is not authorized",
+        );
+    }
+    let Some(active_job) = &status.active_job else {
+        return rejected(
+            SharePrecheckVerdict::RejectedNoActiveJob,
+            "no active stratum job is available",
+        );
+    };
+    if policy.require_matching_job_id && candidate.job_id != active_job.job_id {
+        return rejected(
+            SharePrecheckVerdict::RejectedStaleJob,
+            "share job_id does not match active job",
+        );
+    }
+    if policy.require_current_difficulty && status.current_difficulty.is_none() {
+        return rejected(
+            SharePrecheckVerdict::RejectedDifficultyMissing,
+            "current pool difficulty is not known",
+        );
+    }
+
+    SharePrecheckResult {
+        verdict: SharePrecheckVerdict::AcceptedForSubmit,
+        submit_allowed: policy.enabled_in_build,
+        reasons: if policy.enabled_in_build {
+            vec!["share passed local precheck".to_string()]
+        } else {
+            vec!["share passed local precheck but submit is disabled in build 0.1.0".to_string()]
+        },
+    }
+}
+
+fn rejected(verdict: SharePrecheckVerdict, reason: &str) -> SharePrecheckResult {
+    SharePrecheckResult {
+        verdict,
+        submit_allowed: false,
+        reasons: vec![reason.to_string()],
     }
 }
 
@@ -246,6 +414,13 @@ fn validate_hex(value: &str, name: &'static str) -> Result<(), StratumMessageErr
     Ok(())
 }
 
+fn validate_fixed_hex(value: &str, expected_len: usize) -> Result<(), StratumMessageError> {
+    if value.len() != expected_len {
+        return Err(StratumMessageError::InvalidHex("fixed hex"));
+    }
+    validate_hex(value, "fixed hex")
+}
+
 fn classify_result(id: Option<&Value>, result: Option<&Value>) -> StratumMessageKind {
     match (id.and_then(Value::as_i64), result) {
         (Some(1), Some(_)) => StratumMessageKind::SubscribeResult,
@@ -282,6 +457,8 @@ mod tests {
         assert!(!status.subscribed);
         assert!(!status.authorized);
         assert_eq!(status.pending_jobs, 0);
+        assert!(!status.submit_policy.enabled_in_build);
+        assert!(status.submit_policy.local_precheck_required);
     }
 
     #[test]
@@ -344,5 +521,83 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, StratumMessageError::InvalidParams(_)));
+    }
+
+    #[test]
+    fn share_precheck_rejects_invalid_nonce_before_socket_state() {
+        let pipeline = JobPipelinePolicy::from(PoolConnectionPolicy::default());
+        let status = StratumEngineStatus::planned(Some(0), &pipeline);
+        let candidate = share_candidate("job-1", "bad");
+        let result = precheck_share_submit(&candidate, &status);
+
+        assert_eq!(result.verdict, SharePrecheckVerdict::RejectedInvalidField);
+        assert!(!result.submit_allowed);
+    }
+
+    #[test]
+    fn share_precheck_rejects_when_socket_is_closed() {
+        let pipeline = JobPipelinePolicy::from(PoolConnectionPolicy::default());
+        let status = StratumEngineStatus::planned(Some(0), &pipeline);
+        let candidate = share_candidate("job-1", "00000001");
+        let result = precheck_share_submit(&candidate, &status);
+
+        assert_eq!(result.verdict, SharePrecheckVerdict::RejectedSocketClosed);
+        assert!(!result.submit_allowed);
+    }
+
+    #[test]
+    fn share_precheck_rejects_stale_job_ids() {
+        let pipeline = JobPipelinePolicy::from(PoolConnectionPolicy::default());
+        let mut status = StratumEngineStatus::planned(Some(0), &pipeline);
+        status.socket_open = true;
+        status.subscribed = true;
+        status.authorized = true;
+        status.current_difficulty = Some(8192.0);
+        status.active_job = Some(job_template("active-job"));
+        let candidate = share_candidate("old-job", "00000001");
+        let result = precheck_share_submit(&candidate, &status);
+
+        assert_eq!(result.verdict, SharePrecheckVerdict::RejectedStaleJob);
+        assert!(!result.submit_allowed);
+    }
+
+    #[test]
+    fn share_precheck_accepts_locally_but_submit_stays_disabled_in_build() {
+        let pipeline = JobPipelinePolicy::from(PoolConnectionPolicy::default());
+        let mut status = StratumEngineStatus::planned(Some(0), &pipeline);
+        status.socket_open = true;
+        status.subscribed = true;
+        status.authorized = true;
+        status.current_difficulty = Some(8192.0);
+        status.active_job = Some(job_template("active-job"));
+        let candidate = share_candidate("active-job", "00000001");
+        let result = precheck_share_submit(&candidate, &status);
+
+        assert_eq!(result.verdict, SharePrecheckVerdict::AcceptedForSubmit);
+        assert!(!result.submit_allowed);
+        assert!(result.reasons[0].contains("disabled"));
+    }
+
+    fn share_candidate(job_id: &str, nonce: &str) -> StratumShareCandidate {
+        StratumShareCandidate {
+            worker: "acct.worker".to_string(),
+            job_id: job_id.to_string(),
+            extranonce2: "00000002".to_string(),
+            ntime: "5f5e1000".to_string(),
+            nonce: nonce.to_string(),
+        }
+    }
+
+    fn job_template(job_id: &str) -> StratumJobTemplate {
+        StratumJobTemplate {
+            job_id: job_id.to_string(),
+            prev_hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .to_string(),
+            merkle_branch_len: 0,
+            version: "20000000".to_string(),
+            bits: "1d00ffff".to_string(),
+            time: "5f5e1000".to_string(),
+            clean_jobs: true,
+        }
     }
 }

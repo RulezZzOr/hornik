@@ -41,9 +41,10 @@ pub use status::{
     RuntimeBackendModeParseError, Severity, SystemInfo,
 };
 pub use stratum::{
-    ShareValidationMode, StratumConnectionState, StratumEngineState, StratumEngineStatus,
-    StratumJobTemplate, StratumMessageClassification, StratumMessageError, StratumMessageKind,
-    StratumProtocol, classify_stratum_message,
+    SharePrecheckResult, SharePrecheckVerdict, ShareValidationMode, StratumConnectionState,
+    StratumEngineState, StratumEngineStatus, StratumJobTemplate, StratumMessageClassification,
+    StratumMessageError, StratumMessageKind, StratumProtocol, StratumShareCandidate,
+    StratumSubmitPolicy, classify_stratum_message, precheck_share_submit,
 };
 pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{

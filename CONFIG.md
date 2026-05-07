@@ -157,6 +157,11 @@ Build `0.1.0` exposes a Stratum V1 status model and message classifier only.
 It does not open sockets, subscribe, authorize, dispatch jobs, or submit
 shares.
 
+`mining.submit` is disabled in this build, but the local submit policy is
+already explicit. Future submits must pass local prechecks for socket state,
+subscription, authorization, active job, current difficulty, matching `job_id`,
+and hex-encoded `extranonce2`, `ntime`, and `nonce` fields.
+
 The future Stratum engine must follow the pool policy and job pipeline:
 
 - keep the active pool connection persistent,

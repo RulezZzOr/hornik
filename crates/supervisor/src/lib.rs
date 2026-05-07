@@ -5,8 +5,8 @@ use openmineros_common::{
     EventsResponse, HardwareProbeReport, HealthStatus, JobPipelinePolicy, MinerStatus, Model,
     PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary,
     ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, StratumEngineStatus,
-    SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig, TuningPlanResponse,
-    UpdateStatus, plan_pool_strategy, summarize_pool_runtime, summarize_pools,
+    StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
+    TuningPlanResponse, UpdateStatus, plan_pool_strategy, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -136,6 +136,10 @@ impl Supervisor {
         StratumEngineStatus::planned(self.pool_strategy().active_priority, &self.job_pipeline())
     }
 
+    pub fn stratum_submit_policy(&self) -> StratumSubmitPolicy {
+        StratumSubmitPolicy::from(&self.job_pipeline())
+    }
+
     pub fn profiles(&self) -> ProfilesResponse {
         ProfilesResponse::from(self.tuning)
     }
@@ -256,6 +260,8 @@ impl Supervisor {
                 "subscribed": stratum.subscribed,
                 "authorized": stratum.authorized,
                 "share_validation": stratum.share_validation,
+                "submit_enabled_in_build": stratum.submit_policy.enabled_in_build,
+                "local_precheck_required": stratum.submit_policy.local_precheck_required,
             }),
         );
 
@@ -486,6 +492,21 @@ impl Supervisor {
             &mut output,
             "omo_stratum_shares_rejected_total",
             stratum.shares_rejected,
+        );
+        metric(
+            &mut output,
+            "omo_stratum_submit_enabled_in_build",
+            bool_value(stratum.submit_policy.enabled_in_build),
+        );
+        metric(
+            &mut output,
+            "omo_stratum_submit_local_precheck_required",
+            bool_value(stratum.submit_policy.local_precheck_required),
+        );
+        metric(
+            &mut output,
+            "omo_stratum_submit_max_queue_depth",
+            stratum.submit_policy.max_submit_queue_depth,
         );
 
         labeled_metric(
@@ -1029,6 +1050,8 @@ mod tests {
         assert!(!overview.stratum.socket_open);
         assert_eq!(overview.stratum.active_pool_priority, Some(0));
         assert!(!overview.stratum.authorized);
+        assert!(!overview.stratum.submit_policy.enabled_in_build);
+        assert!(overview.stratum.submit_policy.local_precheck_required);
         assert!(metrics.contains("omo_pool_latency_warning_ms 250"));
         assert!(metrics.contains("omo_pool_job_processing_budget_ms 25"));
         assert!(metrics.contains("omo_pool_strategy_enabled_candidates_total 1"));
@@ -1037,6 +1060,8 @@ mod tests {
         assert!(metrics.contains("omo_job_drop_stale 1"));
         assert!(metrics.contains("omo_stratum_socket_open 0"));
         assert!(metrics.contains("omo_stratum_active_pool_priority 0"));
+        assert!(metrics.contains("omo_stratum_submit_enabled_in_build 0"));
+        assert!(metrics.contains("omo_stratum_submit_local_precheck_required 1"));
         assert!(!metrics.contains("super-secret"));
     }
 

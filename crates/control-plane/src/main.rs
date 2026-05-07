@@ -9,6 +9,7 @@ use axum::{
     routing::get,
 };
 use clap::Parser;
+use openmineros_common::StratumSubmitPolicy;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
@@ -74,6 +75,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/pools", get(pools))
         .route("/api/v1/pools/strategy", get(pool_strategy))
         .route("/api/v1/stratum/status", get(stratum_status))
+        .route("/api/v1/stratum/submit-policy", get(stratum_submit_policy))
         .route("/api/v1/profiles", get(profiles))
         .route("/api/v1/tuning/plan", get(tuning_plan))
         .route("/api/v1/events", get(events))
@@ -139,6 +141,12 @@ async fn pool_strategy(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolSt
 
 async fn stratum_status(State(supervisor): State<Arc<Supervisor>>) -> Json<StratumEngineStatus> {
     Json(supervisor.stratum_status())
+}
+
+async fn stratum_submit_policy(
+    State(supervisor): State<Arc<Supervisor>>,
+) -> Json<StratumSubmitPolicy> {
+    Json(supervisor.stratum_submit_policy())
 }
 
 async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesResponse> {

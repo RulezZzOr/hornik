@@ -555,6 +555,10 @@
                   <div class="kv-key">Shares</div>
                   <div class="kv-value" id="stratum-shares">--</div>
                 </div>
+                <div class="kv-row">
+                  <div class="kv-key">Submit</div>
+                  <div class="kv-value" id="stratum-submit">--</div>
+                </div>
               </div>
             </section>
 
@@ -861,6 +865,10 @@
         text(
           "stratum-shares",
           `${stratum.shares_submitted} submitted / ${stratum.shares_accepted} accepted / ${stratum.shares_rejected} rejected`,
+        );
+        text(
+          "stratum-submit",
+          `${stratum.submit_policy.enabled_in_build ? "enabled" : "disabled"} / precheck ${bool(stratum.submit_policy.local_precheck_required)} / queue ${stratum.submit_policy.max_submit_queue_depth}`,
         );
       }
 

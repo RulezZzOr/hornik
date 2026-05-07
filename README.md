@@ -63,6 +63,7 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/miner/job-pipeline`
 - `GET /api/v1/chains`
 - `GET /api/v1/stratum/status`
+- `GET /api/v1/stratum/submit-policy`
 - `GET /api/v1/contribution/status`
 - `GET /api/v1/pools/strategy`
 - `GET /metrics`

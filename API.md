@@ -221,6 +221,7 @@ bundles, or reboot the device.
 - `GET /api/v1/pools`
 - `GET /api/v1/pools/strategy`
 - `GET /api/v1/stratum/status`
+- `GET /api/v1/stratum/submit-policy`
 - `GET /api/v1/profiles`
 - `GET /api/v1/tuning/plan`
 
@@ -341,7 +342,23 @@ Stratum status response:
   "shares_submitted": 0,
   "shares_accepted": 0,
   "shares_rejected": 0,
-  "share_validation": "planned_local_precheck"
+  "share_validation": "planned_local_precheck",
+  "submit_policy": {
+    "enabled_in_build": false,
+    "local_precheck_required": true,
+    "require_socket_open": true,
+    "require_subscribed": true,
+    "require_authorized": true,
+    "require_active_job": true,
+    "require_current_difficulty": true,
+    "require_matching_job_id": true,
+    "require_hex_extranonce2": true,
+    "require_hex_ntime": true,
+    "require_hex_nonce": true,
+    "ntime_hex_len": 8,
+    "nonce_hex_len": 8,
+    "max_submit_queue_depth": 2
+  }
 }
 ```
 
@@ -349,6 +366,31 @@ Build `0.1.0` includes a Stratum V1 message classifier for `mining.notify`
 and `mining.set_difficulty`, but does not open sockets, subscribe, authorize,
 dispatch jobs, or submit shares. Future networking code must keep pool secrets
 out of metrics and run local share prechecks before submit.
+
+Submit policy response:
+
+```json
+{
+  "enabled_in_build": false,
+  "local_precheck_required": true,
+  "require_socket_open": true,
+  "require_subscribed": true,
+  "require_authorized": true,
+  "require_active_job": true,
+  "require_current_difficulty": true,
+  "require_matching_job_id": true,
+  "require_hex_extranonce2": true,
+  "require_hex_ntime": true,
+  "require_hex_nonce": true,
+  "ntime_hex_len": 8,
+  "nonce_hex_len": 8,
+  "max_submit_queue_depth": 2
+}
+```
+
+The local share precheck rejects invalid hex fields, closed sockets,
+unsubscribed or unauthorized sessions, missing difficulty, missing active jobs,
+and stale `job_id` values before a future `mining.submit` call can happen.
 
 Profiles response:
 
@@ -465,6 +507,9 @@ omo_stratum_pending_jobs
 omo_stratum_shares_submitted_total
 omo_stratum_shares_accepted_total
 omo_stratum_shares_rejected_total
+omo_stratum_submit_enabled_in_build
+omo_stratum_submit_local_precheck_required
+omo_stratum_submit_max_queue_depth
 omo_system_health_state{state="mining"}
 omo_system_health_severity
 omo_pool_configured_total
