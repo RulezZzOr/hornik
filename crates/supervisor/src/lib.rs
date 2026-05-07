@@ -2,11 +2,12 @@ use openmineros_asic_backend::{BackendError, BackendHandle};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
-    EventsResponse, HardwareProbeReport, HealthStatus, JobPipelinePolicy, MinerStatus, Model,
-    PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary,
-    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, StratumEngineStatus,
-    StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
-    TuningPlanResponse, UpdateStatus, plan_pool_strategy, summarize_pool_runtime, summarize_pools,
+    EventsResponse, HardwareIdentityReport, HardwareProbeReport, HealthStatus, JobPipelinePolicy,
+    MinerStatus, Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary, PoolStrategyResponse,
+    PoolSummary, ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity,
+    StratumEngineStatus, StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo,
+    TuningConfig, TuningPlanResponse, UpdateStatus, plan_pool_strategy, summarize_pool_runtime,
+    summarize_pools,
 };
 use serde_json::json;
 use std::time::Instant;
@@ -112,6 +113,10 @@ impl Supervisor {
         self.backend.probe_report()
     }
 
+    pub fn hardware_identity_report(&self) -> HardwareIdentityReport {
+        self.backend.identity_report()
+    }
+
     pub fn contribution_status(&self) -> ContributionStatus {
         ContributionStatus::from(self.contribution)
     }
@@ -151,6 +156,7 @@ impl Supervisor {
     pub fn events(&self) -> EventsResponse {
         let mut events = EventBuilder::new(self.uptime_seconds());
         let system_info = self.system_info();
+        let identity = self.hardware_identity_report();
         let health = self.health();
         let pools = self.pools();
         let pool_runtime = self.pool_runtime();
@@ -172,6 +178,23 @@ impl Supervisor {
                 "backend": system_info.backend,
                 "firmware_version": system_info.firmware_version,
                 "active_slot": system_info.active_slot,
+            }),
+        );
+
+        events.push(
+            EventSeverity::Info,
+            "hardware.identity_evaluated",
+            "hardware",
+            "hardware identity evaluated from configured target and read-only evidence",
+            json!({
+                "state": identity.state,
+                "confidence": identity.confidence,
+                "configured_board": identity.configured_board,
+                "configured_model": identity.configured_model,
+                "detected_board": identity.detected_board,
+                "detected_model": identity.detected_model,
+                "evidence_count": identity.evidence.len(),
+                "safe_read_only": identity.safe_read_only,
             }),
         );
 
@@ -341,6 +364,7 @@ impl Supervisor {
             generated_uptime_seconds: self.uptime_seconds(),
             privacy: SupportBundlePrivacy::default(),
             system: self.system_info(),
+            identity: self.hardware_identity_report(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -364,6 +388,7 @@ impl Supervisor {
         openmineros_common::DashboardOverview {
             schema_version: openmineros_common::DashboardOverview::SCHEMA_VERSION,
             system: self.system_info(),
+            identity: self.hardware_identity_report(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -382,6 +407,7 @@ impl Supervisor {
 
     pub fn prometheus_metrics(&self) -> String {
         let system = self.system_info();
+        let identity = self.hardware_identity_report();
         let health = self.health();
         let miner = self.miner_status();
         let job_pipeline = self.job_pipeline();
@@ -406,6 +432,16 @@ impl Supervisor {
             &mut output,
             "omo_miner_uptime_seconds",
             system.uptime_seconds,
+        );
+        metric(
+            &mut output,
+            "omo_hardware_identity_evidence_total",
+            identity.evidence.len(),
+        );
+        metric(
+            &mut output,
+            "omo_hardware_identity_conflict",
+            bool_value(identity.state == openmineros_common::HardwareIdentityState::Conflict),
         );
         metric(
             &mut output,
@@ -814,6 +850,12 @@ mod tests {
             events
                 .events
                 .iter()
+                .any(|event| event.event_type == "hardware.identity_evaluated")
+        );
+        assert!(
+            events
+                .events
+                .iter()
                 .any(|event| event.event_type == "stratum.engine_planned")
         );
     }
@@ -948,11 +990,15 @@ mod tests {
         )
         .unwrap();
         let report = supervisor.hardware_probe_report();
+        let identity = supervisor.hardware_identity_report();
 
         assert_eq!(report.backend, RuntimeBackendMode::HardwareProbe);
         assert_eq!(report.model, Model::S19jPro);
         assert_eq!(report.board_family, BoardFamily::Xilinx);
         assert!(report.safe_read_only);
+        assert_eq!(identity.backend, RuntimeBackendMode::HardwareProbe);
+        assert!(identity.safe_read_only);
+        assert_eq!(identity.configured_board, BoardFamily::Xilinx);
         assert!(
             report
                 .checks
@@ -988,6 +1034,10 @@ mod tests {
             openmineros_common::DashboardOverview::SCHEMA_VERSION
         );
         assert_eq!(overview.pools.enabled, 1);
+        assert_eq!(
+            overview.identity.state,
+            openmineros_common::HardwareIdentityState::ConfiguredOnly
+        );
         assert!(overview.contribution.target_locked);
         assert!(overview.update.rollback_available);
         assert!(
@@ -1062,6 +1112,8 @@ mod tests {
         assert!(metrics.contains("omo_stratum_active_pool_priority 0"));
         assert!(metrics.contains("omo_stratum_submit_enabled_in_build 0"));
         assert!(metrics.contains("omo_stratum_submit_local_precheck_required 1"));
+        assert!(metrics.contains("omo_hardware_identity_evidence_total"));
+        assert!(metrics.contains("omo_hardware_identity_conflict 0"));
         assert!(!metrics.contains("super-secret"));
     }
 

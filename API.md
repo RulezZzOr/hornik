@@ -6,6 +6,7 @@ All public REST endpoints are versioned under `/api/v1`.
 
 - `GET /api/v1/overview`
 - `GET /api/v1/hardware/targets`
+- `GET /api/v1/hardware/identity`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
@@ -23,6 +24,7 @@ Overview response:
     "board_family": "xilinx",
     "backend": "simulated"
   },
+  "identity": {},
   "health": {},
   "miner": {},
   "job_pipeline": {},
@@ -79,6 +81,38 @@ Build `0.1.0` treats S19j Pro on Xilinx, BeagleBone Black, and Amlogic as
 MVP-stable. Other S19-class Xilinx, BeagleBone Black, and Amlogic targets are
 listed as experimental until hardware validation is complete. CVitek is listed
 for operator identification but is not supported in build `0.1.0`.
+
+Hardware identity report:
+
+```json
+{
+  "schema_version": 1,
+  "backend": "hardware-probe",
+  "safe_read_only": true,
+  "state": "inferred",
+  "confidence": "high",
+  "configured_board": "xilinx",
+  "configured_model": "s19j-pro",
+  "detected_board": "xilinx",
+  "detected_model": "s19j-pro",
+  "evidence": [
+    {
+      "source": "device-tree",
+      "key": "device tree model",
+      "value": "Antminer S19j Pro Xilinx Zynq",
+      "matched_board": "xilinx",
+      "matched_model": "s19j-pro",
+      "detail": "matched s19-xil and s19j-pro"
+    }
+  ],
+  "notes": []
+}
+```
+
+Build `0.1.0` never auto-switches the configured target. The identity endpoint
+only classifies read-only evidence as `configured_only`, `inferred`,
+`conflict`, or `unknown`. A conflict means the configured board/model stays
+active and hardware actions remain guarded until an operator reviews it.
 
 Hardware probe report:
 
@@ -167,6 +201,7 @@ Support bundle response:
     "raw_logs_included": false
   },
   "system": {},
+  "identity": {},
   "health": {},
   "miner": {},
   "job_pipeline": {},
@@ -493,6 +528,8 @@ omo_miner_hashrate_ths
 omo_miner_power_watts
 omo_miner_efficiency_j_th
 omo_miner_uptime_seconds
+omo_hardware_identity_evidence_total
+omo_hardware_identity_conflict
 omo_job_notify_to_dispatch_budget_ms
 omo_job_stale_retirement_ms
 omo_job_max_pending_jobs

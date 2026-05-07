@@ -2,6 +2,7 @@ pub mod board;
 pub mod config;
 pub mod contribution;
 pub mod event;
+pub mod identity;
 pub mod job;
 pub mod manifest;
 pub mod overview;
@@ -24,6 +25,10 @@ pub use contribution::{
     MAX_CONTRIBUTION_RATE_PERCENT, MUTABLE_CONTRIBUTION_FIELDS, default_contribution_endpoints,
 };
 pub use event::{EventBuilder, EventEnvelope, EventRecord, EventSeverity, EventsResponse};
+pub use identity::{
+    HardwareIdentityConfidence, HardwareIdentityEvidence, HardwareIdentityObservation,
+    HardwareIdentityReport, HardwareIdentityState, infer_hardware_identity,
+};
 pub use job::{JobPipelinePolicy, JobPipelineState};
 pub use manifest::{
     ArtifactBudget, ArtifactBudgetEntry, ArtifactBudgetReport, ArtifactManifest, ManifestError,

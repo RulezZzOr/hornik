@@ -9,6 +9,7 @@ Build `0.1.0` is a safe development baseline:
 - Rust workspace bootstrapped for runtime modules.
 - Board identity support for Xilinx/Zynq, BeagleBone Black, Amlogic, and CVitek.
 - S19-class model matrix with explicit support levels.
+- Read-only hardware identity report for configured vs inferred S19 target.
 - Simulated ASIC backend for local API and UI development.
 - REST endpoints for dashboard overview, system info, health, miner status, chains, contribution status, and Prometheus metrics.
 - Validated user pool config with redacted pool status API.
@@ -57,6 +58,7 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/system/info`
 - `GET /api/v1/overview`
 - `GET /api/v1/hardware/targets`
+- `GET /api/v1/hardware/identity`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
@@ -78,6 +80,8 @@ For board bring-up work, `hardware-probe` exposes the same API shape but stays
 read-only and reports zero hashrate until ASIC bus probing is implemented.
 `GET /api/v1/hardware/probe` checks expected OS paths only; it does not issue
 GPIO, UART, fan, voltage, clock, pool, or ASIC commands.
+`GET /api/v1/hardware/identity` compares the configured board/model with
+read-only evidence and never auto-switches the target in build `0.1.0`.
 
 ```bash
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro

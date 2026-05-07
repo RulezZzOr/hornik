@@ -1,7 +1,7 @@
 use crate::{
-    ChainStatus, ContributionStatus, EventsResponse, HealthStatusResponse, JobPipelinePolicy,
-    MinerStatus, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary, ProfilesResponse,
-    StratumEngineStatus, SystemInfo, TuningPlanResponse, UpdateStatus,
+    ChainStatus, ContributionStatus, EventsResponse, HardwareIdentityReport, HealthStatusResponse,
+    JobPipelinePolicy, MinerStatus, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary,
+    ProfilesResponse, StratumEngineStatus, SystemInfo, TuningPlanResponse, UpdateStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub struct DashboardOverview {
     pub schema_version: u8,
     pub system: SystemInfo,
+    pub identity: HardwareIdentityReport,
     pub health: HealthStatusResponse,
     pub miner: MinerStatus,
     pub job_pipeline: JobPipelinePolicy,

@@ -1,7 +1,8 @@
 use openmineros_common::{
-    BoardFamily, BoardProfile, Capability, CapabilitySet, ChainStatus, HardwareProbeReport,
-    HealthStatus, MinerMode, MinerStatus, Model, ProbeCheck, ProbeStatus, RuntimeBackendMode,
-    Severity, SupportLevel, TargetError, supported_targets,
+    BoardFamily, BoardProfile, Capability, CapabilitySet, ChainStatus, HardwareIdentityObservation,
+    HardwareIdentityReport, HardwareProbeReport, HealthStatus, MinerMode, MinerStatus, Model,
+    ProbeCheck, ProbeStatus, RuntimeBackendMode, Severity, SupportLevel, TargetError,
+    infer_hardware_identity, supported_targets,
 };
 use std::path::Path;
 use thiserror::Error;
@@ -96,6 +97,13 @@ impl BackendHandle {
             Self::HardwareProbe(backend) => backend.probe_report(),
         }
     }
+
+    pub fn identity_report(&self) -> HardwareIdentityReport {
+        match self {
+            Self::Simulated(backend) => backend.identity_report(),
+            Self::HardwareProbe(backend) => backend.identity_report(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -171,6 +179,10 @@ impl SimulatedBackend {
                     .to_string(),
             ],
         )
+    }
+
+    pub fn identity_report(&self) -> HardwareIdentityReport {
+        HardwareIdentityReport::simulated(self.profile.family, self.model)
     }
 }
 
@@ -259,6 +271,15 @@ impl HardwareProbeBackend {
             ],
         )
     }
+
+    pub fn identity_report(&self) -> HardwareIdentityReport {
+        infer_hardware_identity(
+            self.mode(),
+            self.profile.family,
+            self.model,
+            identity_observations(self.profile.family, ProbeMode::ReadOnlyFilesystem),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,6 +301,41 @@ fn probe_plan(board: BoardFamily, mode: ProbeMode) -> Vec<ProbeCheck> {
         .into_iter()
         .map(|expectation| probe_check(expectation, mode))
         .collect()
+}
+
+fn identity_observations(board: BoardFamily, mode: ProbeMode) -> Vec<HardwareIdentityObservation> {
+    let mut observations = Vec::new();
+
+    for expectation in probe_expectations(board) {
+        if mode == ProbeMode::ReadOnlyFilesystem {
+            let path = Path::new(expectation.path);
+            if path.is_file() {
+                if let Ok(value) = std::fs::read_to_string(path) {
+                    observations.push(HardwareIdentityObservation {
+                        source: expectation.interface.to_string(),
+                        key: expectation.name.to_string(),
+                        value: sanitize_observation_value(&value),
+                    });
+                }
+            } else if path.exists() {
+                observations.push(HardwareIdentityObservation {
+                    source: expectation.interface.to_string(),
+                    key: expectation.name.to_string(),
+                    value: format!("{} present", expectation.path),
+                });
+            }
+        }
+    }
+
+    observations
+}
+
+fn sanitize_observation_value(value: &str) -> String {
+    value
+        .replace('\0', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn probe_check(expectation: ProbeExpectation, mode: ProbeMode) -> ProbeCheck {
@@ -508,6 +564,20 @@ mod tests {
     }
 
     #[test]
+    fn simulated_identity_uses_configured_target_only() {
+        let backend = SimulatedBackend::new(Model::S19jPro, BoardFamily::Xilinx).unwrap();
+        let identity = backend.identity_report();
+
+        assert_eq!(
+            identity.state,
+            openmineros_common::HardwareIdentityState::ConfiguredOnly
+        );
+        assert_eq!(identity.configured_board, BoardFamily::Xilinx);
+        assert_eq!(identity.configured_model, Model::S19jPro);
+        assert!(identity.detected_board.is_none());
+    }
+
+    #[test]
     fn hardware_probe_report_has_required_xilinx_checks() {
         let backend = HardwareProbeBackend::new(Model::S19jPro, BoardFamily::Xilinx).unwrap();
         let report = backend.probe_report();
@@ -528,5 +598,16 @@ mod tests {
                 .iter()
                 .any(|check| check.interface == "gpio" && check.required)
         );
+    }
+
+    #[test]
+    fn hardware_probe_identity_is_read_only() {
+        let backend = HardwareProbeBackend::new(Model::S19jPro, BoardFamily::Xilinx).unwrap();
+        let identity = backend.identity_report();
+
+        assert!(identity.safe_read_only);
+        assert_eq!(identity.backend, RuntimeBackendMode::HardwareProbe);
+        assert_eq!(identity.configured_board, BoardFamily::Xilinx);
+        assert_eq!(identity.configured_model, Model::S19jPro);
     }
 }

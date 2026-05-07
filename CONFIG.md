@@ -37,6 +37,19 @@ cargo run -p openmineros-control-plane -- \
   --config config/default.toml
 ```
 
+## Hardware Identity
+
+`board` and `model` are still explicit runtime inputs in build `0.1.0`.
+The hardware identity report can infer likely S19 board/model evidence from
+read-only sources, but it does not automatically change the configured target.
+
+Possible identity states:
+
+- `configured_only`: simulated backend or no probe evidence is used,
+- `inferred`: read-only evidence matches a supported board or model,
+- `conflict`: detected evidence disagrees with configured board/model,
+- `unknown`: no supported S19 identity evidence was found.
+
 ## Contribution
 
 ```toml

@@ -518,6 +518,27 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Hardware Identity</h2>
+                <span class="state" id="identity-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Configured</div>
+                  <div class="kv-value" id="identity-configured">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Detected</div>
+                  <div class="kv-value" id="identity-detected">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Evidence</div>
+                  <div class="kv-value" id="identity-evidence">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Job Pipeline</h2>
                 <span class="state" id="job-pipeline-state">--</span>
               </div>
@@ -715,6 +736,7 @@
         renderJobPipeline(overview.job_pipeline);
         renderStratum(overview.stratum);
         renderSystem(overview);
+        renderIdentity(overview.identity);
         renderTuning(overview.profiles);
         renderTuningPlan(overview.tuning_plan);
         renderSlots(overview.update);
@@ -880,6 +902,25 @@
         text("backend", system.backend);
         text("uptime", formatSeconds(system.uptime_seconds));
         text("capabilities", system.capabilities.flags.join(", ") || "--");
+      }
+
+      function renderIdentity(identity) {
+        if (!identity) return;
+        text("identity-state", `${identity.state} / ${identity.confidence}`);
+        text(
+          "identity-configured",
+          `${identity.configured_model} on ${identity.configured_board}`,
+        );
+        text(
+          "identity-detected",
+          identity.detected_model || identity.detected_board
+            ? `${identity.detected_model || "--"} on ${identity.detected_board || "--"}`
+            : "--",
+        );
+        text(
+          "identity-evidence",
+          `${identity.evidence.length} read-only matches / auto-switch off`,
+        );
       }
 
       function renderTuning(profiles) {
