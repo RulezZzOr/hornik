@@ -560,6 +560,27 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Hardware Readiness</h2>
+                <span class="state" id="readiness-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Target</div>
+                  <div class="kv-value" id="readiness-target">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Recovery</div>
+                  <div class="kv-value" id="readiness-recovery">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Actions</div>
+                  <div class="kv-value" id="readiness-actions">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Job Pipeline</h2>
                 <span class="state" id="job-pipeline-state">--</span>
               </div>
@@ -759,6 +780,7 @@
         renderSystem(overview);
         renderIdentity(overview.identity);
         renderSafety(overview.safety);
+        renderReadiness(overview.readiness);
         renderTuning(overview.profiles);
         renderTuningPlan(overview.tuning_plan);
         renderSlots(overview.update);
@@ -959,6 +981,23 @@
         text(
           "safety-reason",
           safety.reasons.length ? safety.reasons[0] : "--",
+        );
+      }
+
+      function renderReadiness(readiness) {
+        if (!readiness) return;
+        const allowed = readiness.actions.filter((action) => action.allowed);
+        text("readiness-state", readiness.state);
+        text(
+          "readiness-target",
+          `${readiness.model} on ${readiness.board_family} / ${readiness.support}`,
+        );
+        text("readiness-recovery", readiness.recovery);
+        text(
+          "readiness-actions",
+          allowed.length
+            ? allowed.map((action) => action.action).join(", ")
+            : "all hardware actions blocked",
         );
       }
 

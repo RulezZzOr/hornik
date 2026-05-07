@@ -11,6 +11,7 @@ Build `0.1.0` is a safe development baseline:
 - S19-class model matrix with explicit support levels.
 - Read-only hardware identity report for configured vs inferred S19 target.
 - Central hardware safety gate for mining, flashing, tuning, and ASIC writes.
+- Hardware readiness report for target support, recovery path, capabilities, and allowed actions.
 - Simulated ASIC backend for local API and UI development.
 - REST endpoints for dashboard overview, system info, health, miner status, chains, contribution status, and Prometheus metrics.
 - Validated user pool config with redacted pool status API.
@@ -61,6 +62,7 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/hardware/targets`
 - `GET /api/v1/hardware/identity`
 - `GET /api/v1/hardware/safety`
+- `GET /api/v1/hardware/readiness`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
@@ -86,6 +88,8 @@ GPIO, UART, fan, voltage, clock, pool, or ASIC commands.
 read-only evidence and never auto-switches the target in build `0.1.0`.
 `GET /api/v1/hardware/safety` keeps real hardware mining, flashing, tuning
 writes, and ASIC bus writes disabled until the backend implements those paths.
+`GET /api/v1/hardware/readiness` rolls target support, recovery method,
+capabilities, and the safety gate into one operator-facing status report.
 
 ```bash
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro

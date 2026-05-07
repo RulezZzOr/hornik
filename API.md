@@ -8,6 +8,7 @@ All public REST endpoints are versioned under `/api/v1`.
 - `GET /api/v1/hardware/targets`
 - `GET /api/v1/hardware/identity`
 - `GET /api/v1/hardware/safety`
+- `GET /api/v1/hardware/readiness`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
@@ -27,6 +28,7 @@ Overview response:
   },
   "identity": {},
   "safety": {},
+  "readiness": {},
   "health": {},
   "miner": {},
   "job_pipeline": {},
@@ -137,6 +139,36 @@ allows synthetic mining state only in the simulated backend. Hardware mining,
 ASIC bus writes, tuning writes, and flashing remain disabled on real/probe
 targets. Identity conflicts and unsupported targets block all actions.
 
+Hardware readiness report:
+
+```json
+{
+  "schema_version": 1,
+  "backend": "hardware-probe",
+  "model": "s19j-pro",
+  "board_family": "xilinx",
+  "support": "mvp-stable",
+  "recovery": "external microSD",
+  "capabilities": {
+    "flags": ["install.sd", "install.commander", "update.ab"]
+  },
+  "state": "read_only_needs_identity",
+  "actions": [
+    {
+      "action": "hardware_mining",
+      "allowed": false,
+      "reason": "real mining remains disabled until a hardware backend is implemented and gated"
+    }
+  ],
+  "notes": []
+}
+```
+
+The readiness report is the operator-facing rollup for S19 variability. It
+combines configured board/model, support level, recovery path, board
+capabilities, and the hardware safety gate. It does not grant additional
+permissions beyond `/api/v1/hardware/safety`.
+
 Hardware probe report:
 
 ```json
@@ -226,6 +258,7 @@ Support bundle response:
   "system": {},
   "identity": {},
   "safety": {},
+  "readiness": {},
   "health": {},
   "miner": {},
   "job_pipeline": {},
@@ -558,6 +591,8 @@ omo_hardware_safety_configured_target_accepted
 omo_hardware_safety_hardware_mining_allowed
 omo_hardware_safety_asic_bus_writes_allowed
 omo_hardware_safety_flashing_allowed
+omo_hardware_readiness_state{state="simulation_ready"}
+omo_hardware_readiness_actions_allowed_total
 omo_job_notify_to_dispatch_budget_ms
 omo_job_stale_retirement_ms
 omo_job_max_pending_jobs

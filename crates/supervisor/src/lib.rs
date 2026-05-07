@@ -2,11 +2,12 @@ use openmineros_asic_backend::{BackendError, BackendHandle};
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
-    EventsResponse, HardwareIdentityReport, HardwareProbeReport, HardwareSafetyGate, HealthStatus,
-    JobPipelinePolicy, MinerStatus, Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary,
-    PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode, RuntimeConfig,
-    Severity, StratumEngineStatus, StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy,
-    SystemInfo, TuningConfig, TuningPlanResponse, UpdateStatus, evaluate_hardware_safety,
+    EventsResponse, HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport,
+    HardwareReadinessState, HardwareSafetyGate, HealthStatus, JobPipelinePolicy, MinerStatus,
+    Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, Severity, StratumEngineStatus,
+    StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
+    TuningPlanResponse, UpdateStatus, evaluate_hardware_readiness, evaluate_hardware_safety,
     plan_pool_strategy, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
@@ -125,6 +126,16 @@ impl Supervisor {
         )
     }
 
+    pub fn hardware_readiness_report(&self) -> HardwareReadinessReport {
+        evaluate_hardware_readiness(
+            self.backend.mode(),
+            self.backend.model(),
+            self.backend.profile(),
+            self.backend.support(),
+            &self.hardware_safety_gate(),
+        )
+    }
+
     pub fn contribution_status(&self) -> ContributionStatus {
         ContributionStatus::from(self.contribution)
     }
@@ -166,6 +177,7 @@ impl Supervisor {
         let system_info = self.system_info();
         let identity = self.hardware_identity_report();
         let safety = self.hardware_safety_gate();
+        let readiness = self.hardware_readiness_report();
         let health = self.health();
         let pools = self.pools();
         let pool_runtime = self.pool_runtime();
@@ -225,6 +237,24 @@ impl Supervisor {
                 "asic_bus_writes_allowed": safety.asic_bus_writes_allowed,
                 "tuning_writes_allowed": safety.tuning_writes_allowed,
                 "flashing_allowed": safety.flashing_allowed,
+            }),
+        );
+
+        events.push(
+            if readiness.state == HardwareReadinessState::Blocked {
+                EventSeverity::Warn
+            } else {
+                EventSeverity::Info
+            },
+            "hardware.readiness_evaluated",
+            "hardware",
+            "hardware target readiness evaluated",
+            json!({
+                "state": readiness.state,
+                "support": readiness.support,
+                "recovery": readiness.recovery,
+                "capabilities": readiness.capabilities.flags,
+                "actions": readiness.actions,
             }),
         );
 
@@ -396,6 +426,7 @@ impl Supervisor {
             system: self.system_info(),
             identity: self.hardware_identity_report(),
             safety: self.hardware_safety_gate(),
+            readiness: self.hardware_readiness_report(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -421,6 +452,7 @@ impl Supervisor {
             system: self.system_info(),
             identity: self.hardware_identity_report(),
             safety: self.hardware_safety_gate(),
+            readiness: self.hardware_readiness_report(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -441,6 +473,7 @@ impl Supervisor {
         let system = self.system_info();
         let identity = self.hardware_identity_report();
         let safety = self.hardware_safety_gate();
+        let readiness = self.hardware_readiness_report();
         let health = self.health();
         let miner = self.miner_status();
         let job_pipeline = self.job_pipeline();
@@ -495,6 +528,21 @@ impl Supervisor {
             &mut output,
             "omo_hardware_safety_flashing_allowed",
             bool_value(safety.flashing_allowed),
+        );
+        labeled_metric(
+            &mut output,
+            "omo_hardware_readiness_state",
+            &[("state", hardware_readiness_state_label(readiness.state))],
+            1,
+        );
+        metric(
+            &mut output,
+            "omo_hardware_readiness_actions_allowed_total",
+            readiness
+                .actions
+                .iter()
+                .filter(|action| action.allowed)
+                .count(),
         );
         metric(
             &mut output,
@@ -866,6 +914,15 @@ fn slot_state_label(state: openmineros_common::SlotState) -> &'static str {
     }
 }
 
+fn hardware_readiness_state_label(state: HardwareReadinessState) -> &'static str {
+    match state {
+        HardwareReadinessState::SimulationReady => "simulation_ready",
+        HardwareReadinessState::ReadOnlyIdentified => "read_only_identified",
+        HardwareReadinessState::ReadOnlyNeedsIdentity => "read_only_needs_identity",
+        HardwareReadinessState::Blocked => "blocked",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -904,6 +961,12 @@ mod tests {
                 .events
                 .iter()
                 .any(|event| event.event_type == "hardware.identity_evaluated")
+        );
+        assert!(
+            events
+                .events
+                .iter()
+                .any(|event| event.event_type == "hardware.readiness_evaluated")
         );
         assert!(
             events
@@ -1011,6 +1074,7 @@ mod tests {
         let health = supervisor.health();
         let miner = supervisor.miner_status();
         let chains = supervisor.chains();
+        let readiness = supervisor.hardware_readiness_report();
         let events = supervisor.events();
 
         assert_eq!(info.backend, RuntimeBackendMode::HardwareProbe);
@@ -1025,6 +1089,11 @@ mod tests {
         assert_eq!(miner.hashrate_ths, 0.0);
         assert_eq!(miner.mode, openmineros_common::MinerMode::SafeMode);
         assert!(chains.iter().all(|chain| !chain.present));
+        assert_eq!(
+            readiness.state,
+            HardwareReadinessState::ReadOnlyNeedsIdentity
+        );
+        assert!(readiness.actions.iter().all(|action| !action.allowed));
         assert!(
             events
                 .events
@@ -1090,6 +1159,10 @@ mod tests {
         assert_eq!(
             overview.identity.state,
             openmineros_common::HardwareIdentityState::ConfiguredOnly
+        );
+        assert_eq!(
+            overview.readiness.state,
+            HardwareReadinessState::SimulationReady
         );
         assert!(overview.contribution.target_locked);
         assert!(overview.update.rollback_available);
@@ -1167,6 +1240,8 @@ mod tests {
         assert!(metrics.contains("omo_stratum_submit_local_precheck_required 1"));
         assert!(metrics.contains("omo_hardware_identity_evidence_total"));
         assert!(metrics.contains("omo_hardware_identity_conflict 0"));
+        assert!(metrics.contains("omo_hardware_readiness_state{state=\"simulation_ready\"} 1"));
+        assert!(metrics.contains("omo_hardware_readiness_actions_allowed_total 1"));
         assert!(!metrics.contains("super-secret"));
     }
 

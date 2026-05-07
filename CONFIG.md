@@ -62,6 +62,10 @@ The hardware safety gate centralizes whether actions are allowed. In build
 - flashing is disabled,
 - identity conflicts and unsupported targets block all hardware actions.
 
+`GET /api/v1/hardware/readiness` exposes the same decision in a broader target
+report: configured model, board family, support level, recovery method,
+capabilities, readiness state, and per-action allow/deny reasons.
+
 ## Contribution
 
 ```toml
