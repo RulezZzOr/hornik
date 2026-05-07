@@ -35,6 +35,7 @@ Release candidates must pass:
 
 ```bash
 make size-budget
+make artifact-budget
 ```
 
 Default `0.1.0` budgets:
@@ -42,6 +43,8 @@ Default `0.1.0` budgets:
 - `openmineros-control-plane`: 12 MiB
 - `openmineros-commander`: 8 MiB
 - `web/`: 512 KiB
+- each install-image artefact: 64 MiB
+- total artefacts per manifest: 80 MiB
 
 Budget increases require an explicit release note because Antminer control
 boards have limited storage and RAM headroom.

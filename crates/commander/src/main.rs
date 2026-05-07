@@ -1,8 +1,9 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use openmineros_common::{
-    BoardFamily, ContributionStatus, Model, ProfilesResponse, RuntimeConfig, SupportLevel,
-    summarize_pools, supported_targets, target_catalog, verify_manifest_file,
+    ArtifactBudget, BoardFamily, ContributionStatus, Model, ProfilesResponse, RuntimeConfig,
+    SupportLevel, check_manifest_budget_file, summarize_pools, supported_targets, target_catalog,
+    verify_manifest_file,
 };
 use std::path::PathBuf;
 
@@ -34,6 +35,16 @@ enum Command {
         artifact_dir: Option<PathBuf>,
         #[arg(long)]
         allow_flashable_unsigned: bool,
+    },
+    CheckManifestBudget {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        artifact_dir: Option<PathBuf>,
+        #[arg(long, default_value_t = ArtifactBudget::default().max_install_image_bytes)]
+        max_install_image_bytes: u64,
+        #[arg(long, default_value_t = ArtifactBudget::default().max_total_artifact_bytes)]
+        max_total_artifact_bytes: u64,
     },
     ValidateConfig {
         #[arg(long)]
@@ -89,6 +100,29 @@ fn main() -> anyhow::Result<()> {
                     .unwrap_or_else(|| PathBuf::from("."))
             });
             let report = verify_manifest_file(&manifest, artifact_dir, allow_flashable_unsigned)?;
+
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::CheckManifestBudget {
+            manifest,
+            artifact_dir,
+            max_install_image_bytes,
+            max_total_artifact_bytes,
+        } => {
+            let artifact_dir = artifact_dir.unwrap_or_else(|| {
+                manifest
+                    .parent()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."))
+            });
+            let report = check_manifest_budget_file(
+                &manifest,
+                artifact_dir,
+                ArtifactBudget {
+                    max_install_image_bytes,
+                    max_total_artifact_bytes,
+                },
+            )?;
 
             println!("{}", serde_json::to_string_pretty(&report)?);
         }

@@ -16,6 +16,7 @@ make fmt
 make clippy
 make test
 make size-budget
+make artifact-budget
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- validate-config --config config/default.toml
 make image BOARD=s19-xil MODEL=s19j-pro
@@ -64,3 +65,20 @@ Default budgets:
 
 Override with `CONTROL_PLANE_MAX_BYTES`, `COMMANDER_MAX_BYTES`, or
 `WEB_MAX_BYTES` when intentionally changing the budget.
+
+## Artefact Budget
+
+CI also generates development placeholder artefacts for `s19-xil`, `s19-bb`,
+and `s19-aml`, then checks each manifest with:
+
+```bash
+./scripts/check-artifact-budget.sh
+```
+
+Default artefact budgets:
+
+- each `install-image`: 64 MiB
+- total artefacts per manifest: 80 MiB
+
+Override with `MAX_INSTALL_IMAGE_BYTES` or `MAX_TOTAL_ARTIFACT_BYTES` when an
+image format change intentionally changes the budget.

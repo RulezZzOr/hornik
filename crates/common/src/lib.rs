@@ -26,7 +26,8 @@ pub use contribution::{
 pub use event::{EventBuilder, EventEnvelope, EventRecord, EventSeverity, EventsResponse};
 pub use job::{JobPipelinePolicy, JobPipelineState};
 pub use manifest::{
-    ArtifactManifest, ManifestError, ReleaseManifest, ReleaseSignature, VerificationReport,
+    ArtifactBudget, ArtifactBudgetEntry, ArtifactBudgetReport, ArtifactManifest, ManifestError,
+    ReleaseManifest, ReleaseSignature, VerificationReport, check_manifest_budget_file,
     verify_manifest_file,
 };
 pub use overview::DashboardOverview;
