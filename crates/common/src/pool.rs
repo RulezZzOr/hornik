@@ -151,6 +151,7 @@ fn default_keepalive_interval_seconds() -> u32 {
 pub enum PoolRuntimeState {
     Unconfigured,
     ReadyNoConnection,
+    LiveConnection,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

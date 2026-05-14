@@ -3,7 +3,7 @@ use crate::{
     ChainStatus, ContributionStatus, EventsResponse, HardwareIdentityReport,
     HardwareReadinessReport, HardwareSafetyGate, JobPipelinePolicy, MinerStatus,
     PoolRuntimeSummary, PoolStrategyResponse, PoolSummary, ProfilesResponse, StratumEngineStatus,
-    SystemInfo, TuningPlanResponse,
+    SystemInfo, TuningExecutionStatus, TuningPlanResponse,
 };
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +26,7 @@ pub struct SupportBundle {
     pub pool_strategy: PoolStrategyResponse,
     pub profiles: ProfilesResponse,
     pub tuning_plan: TuningPlanResponse,
+    pub tuning_execution: TuningExecutionStatus,
     pub contribution: ContributionStatus,
     pub events: EventsResponse,
 }

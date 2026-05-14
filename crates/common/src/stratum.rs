@@ -13,18 +13,25 @@ pub enum StratumProtocol {
 #[serde(rename_all = "snake_case")]
 pub enum StratumEngineState {
     PlannedNoSocket,
+    Connecting,
+    Live,
+    Degraded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StratumConnectionState {
     NotStarted,
+    Dialing,
+    Connected,
+    Disconnected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ShareValidationMode {
     PlannedLocalPrecheck,
+    LocalPrecheck,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,6 +84,20 @@ impl StratumEngineStatus {
             ],
         }
     }
+
+    pub fn live(active_pool_priority: Option<u8>, job_pipeline: &JobPipelinePolicy) -> Self {
+        let mut status = Self::planned(active_pool_priority, job_pipeline);
+        status.state = StratumEngineState::Connecting;
+        status.connection = StratumConnectionState::Dialing;
+        status.share_validation = ShareValidationMode::LocalPrecheck;
+        status.submit_policy = StratumSubmitPolicy::enabled(job_pipeline);
+        status.notes = vec![
+            "stratum v1 socket engine is active in hardware-mining backend".to_string(),
+            "notify jobs are dispatched to asic backend when permitted and shares are submitted after local precheck"
+                .to_string(),
+        ];
+        status
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +136,14 @@ impl From<&JobPipelinePolicy> for StratumSubmitPolicy {
             nonce_hex_len: 8,
             max_submit_queue_depth: job_pipeline.max_pending_jobs,
         }
+    }
+}
+
+impl StratumSubmitPolicy {
+    pub fn enabled(job_pipeline: &JobPipelinePolicy) -> Self {
+        let mut policy = Self::from(job_pipeline);
+        policy.enabled_in_build = true;
+        policy
     }
 }
 
@@ -263,6 +292,7 @@ pub enum StratumMessageKind {
     MiningSetDifficulty,
     SubscribeResult,
     AuthorizeResult,
+    SubmitResult,
     Unknown,
 }
 
@@ -425,6 +455,7 @@ fn classify_result(id: Option<&Value>, result: Option<&Value>) -> StratumMessage
     match (id.and_then(Value::as_i64), result) {
         (Some(1), Some(_)) => StratumMessageKind::SubscribeResult,
         (Some(2), Some(_)) => StratumMessageKind::AuthorizeResult,
+        (Some(4), Some(_)) => StratumMessageKind::SubmitResult,
         _ => StratumMessageKind::Unknown,
     }
 }

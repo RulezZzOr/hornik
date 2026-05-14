@@ -8,6 +8,7 @@ pub enum RuntimeBackendMode {
     #[default]
     Simulated,
     HardwareProbe,
+    HardwareMining,
 }
 
 impl RuntimeBackendMode {
@@ -15,6 +16,7 @@ impl RuntimeBackendMode {
         match self {
             Self::Simulated => "simulated",
             Self::HardwareProbe => "hardware-probe",
+            Self::HardwareMining => "hardware-mining",
         }
     }
 }
@@ -32,6 +34,9 @@ impl FromStr for RuntimeBackendMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "simulated" | "sim" => Ok(Self::Simulated),
             "hardware-probe" | "hardware_probe" | "probe" | "hw-probe" => Ok(Self::HardwareProbe),
+            "hardware-mining" | "hardware_mining" | "mining" | "hw-mining" => {
+                Ok(Self::HardwareMining)
+            }
             other => Err(RuntimeBackendModeParseError(other.to_string())),
         }
     }

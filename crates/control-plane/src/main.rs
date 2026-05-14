@@ -6,7 +6,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::{Html, IntoResponse},
-    routing::get,
+    routing::{get, post},
 };
 use clap::Parser;
 use openmineros_common::StratumSubmitPolicy;
@@ -15,13 +15,20 @@ use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
     HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport, HardwareSafetyGate,
     JobPipelinePolicy, MinerStatus, Model, PoolStrategyResponse, PoolSummary, ProfilesResponse,
-    RuntimeBackendMode, RuntimeConfig, StratumEngineStatus, SupportBundle, SystemInfo,
-    TargetCatalog, TuningPlanResponse, UpdateStatus, target_catalog,
+    RuntimeBackendMode, RuntimeConfig, SharePrecheckResult, StratumEngineStatus,
+    StratumShareCandidate, SupportBundle, SystemInfo, TargetCatalog, TuningExecutionStatus,
+    TuningPlanResponse, TuningProtocolTranscript, UpdateStatus, target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::time;
 use tracing::info;
+
+#[cfg(test)]
+use axum::{
+    body::{Body, to_bytes},
+    http::{Request, StatusCode},
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "openmineros-control-plane")]
@@ -63,7 +70,19 @@ async fn main() -> anyhow::Result<()> {
         cli.backend,
     )?);
 
-    let app = Router::new()
+    let app = build_app(supervisor);
+
+    let listener = tokio::net::TcpListener::bind(cli.listen).await?;
+    info!(
+        "OpenMinerOS control plane listening on http://{}",
+        cli.listen
+    );
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
+fn build_app(supervisor: Arc<Supervisor>) -> Router {
+    Router::new()
         .route("/", get(index))
         .route("/api/v1/overview", get(overview))
         .route("/api/v1/hardware/targets", get(hardware_targets))
@@ -80,23 +99,18 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/pools/strategy", get(pool_strategy))
         .route("/api/v1/stratum/status", get(stratum_status))
         .route("/api/v1/stratum/submit-policy", get(stratum_submit_policy))
+        .route("/api/v1/stratum/submit-share", post(stratum_submit_share))
         .route("/api/v1/profiles", get(profiles))
         .route("/api/v1/tuning/plan", get(tuning_plan))
+        .route("/api/v1/tuning/execution", get(tuning_execution))
+        .route("/api/v1/tuning/transcript", get(tuning_transcript))
         .route("/api/v1/events", get(events))
         .route("/api/v1/ws", get(ws_events))
         .route("/api/v1/support/bundle", get(support_bundle))
         .route("/api/v1/update/status", get(update_status))
         .route("/api/v1/contribution/status", get(contribution_status))
         .route("/metrics", get(metrics))
-        .with_state(supervisor);
-
-    let listener = tokio::net::TcpListener::bind(cli.listen).await?;
-    info!(
-        "OpenMinerOS control plane listening on http://{}",
-        cli.listen
-    );
-    axum::serve(listener, app).await?;
-    Ok(())
+        .with_state(supervisor)
 }
 
 async fn index() -> Html<&'static str> {
@@ -169,12 +183,31 @@ async fn stratum_submit_policy(
     Json(supervisor.stratum_submit_policy())
 }
 
+async fn stratum_submit_share(
+    State(supervisor): State<Arc<Supervisor>>,
+    Json(candidate): Json<StratumShareCandidate>,
+) -> Json<SharePrecheckResult> {
+    Json(supervisor.submit_share(candidate))
+}
+
 async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesResponse> {
     Json(supervisor.profiles())
 }
 
 async fn tuning_plan(State(supervisor): State<Arc<Supervisor>>) -> Json<TuningPlanResponse> {
     Json(supervisor.tuning_plan())
+}
+
+async fn tuning_execution(
+    State(supervisor): State<Arc<Supervisor>>,
+) -> Json<TuningExecutionStatus> {
+    Json(supervisor.tuning_execution_status())
+}
+
+async fn tuning_transcript(
+    State(supervisor): State<Arc<Supervisor>>,
+) -> Json<TuningProtocolTranscript> {
+    Json(supervisor.tuning_transcript())
 }
 
 async fn events(State(supervisor): State<Arc<Supervisor>>) -> Json<EventsResponse> {
@@ -235,4 +268,155 @@ async fn contribution_status(
 
 async fn metrics(State(supervisor): State<Arc<Supervisor>>) -> String {
     supervisor.prometheus_metrics()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openmineros_common::{RuntimeConfig, SharePrecheckVerdict};
+    use tower::util::ServiceExt;
+
+    #[tokio::test]
+    async fn post_submit_share_returns_precheck_result() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/stratum/submit-share")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"worker":"acct.worker","job_id":"job-1","extranonce2":"00000002","ntime":"5f5e1000","nonce":"00000001"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let result: SharePrecheckResult = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result.verdict, SharePrecheckVerdict::RejectedSocketClosed);
+        assert!(!result.submit_allowed);
+    }
+
+    #[tokio::test]
+    async fn post_submit_share_rejects_invalid_payload() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/stratum/submit-share")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"worker":"acct.worker","job_id":"job-1"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
+    async fn get_tuning_transcript_returns_protocol_frames() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/tuning/transcript")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let transcript: TuningProtocolTranscript = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(transcript.schema_version, 1);
+        assert_eq!(transcript.board_family, BoardFamily::Xilinx);
+        assert_eq!(transcript.chip_id, 0);
+        assert_eq!(transcript.frames.len(), 4);
+        assert_eq!(transcript.frames[0].target_frequency_mhz, 725);
+        assert_eq!(transcript.frames[0].target_voltage_mv, 800);
+        assert!(transcript.frames[0].frame.contains("cmd=set_frequency"));
+        assert!(transcript.frames[3].frame.contains("cmd=set_voltage"));
+    }
+
+    #[tokio::test]
+    async fn get_tuning_execution_returns_structured_steps() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/tuning/execution")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let execution: TuningExecutionStatus = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(execution.schema_version, 1);
+        assert_eq!(
+            execution.state,
+            openmineros_common::TuningExecutionState::Disabled
+        );
+        assert!(!execution.autotune);
+        assert_eq!(execution.current_step.unwrap().order, 1);
+        assert_eq!(execution.queued_steps.len(), 3);
+        assert!(
+            execution
+                .blocked_reason
+                .unwrap()
+                .contains("autotune is disabled")
+        );
+    }
 }

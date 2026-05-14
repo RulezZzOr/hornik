@@ -314,8 +314,11 @@ bundles, or reboot the device.
 - `GET /api/v1/pools/strategy`
 - `GET /api/v1/stratum/status`
 - `GET /api/v1/stratum/submit-policy`
+- `POST /api/v1/stratum/submit-share`
 - `GET /api/v1/profiles`
 - `GET /api/v1/tuning/plan`
+- `GET /api/v1/tuning/execution`
+- `GET /api/v1/tuning/transcript`
 
 Pool responses are redacted. The API reports whether a password is set, but it
 does not return the password value.
@@ -363,10 +366,9 @@ contract for the future stratum engine:
 }
 ```
 
-Build `0.1.0` does not connect to pools yet, so latency and job-processing
-values are `null` and counters are zero. The policy is intentionally strict:
-low latency, fast job handling, and reconnect suppression are first-class
-requirements for the miner engine.
+`simulated` and `hardware-probe` backends keep pool runtime counters at zero.
+`hardware-mining` enables real Stratum socket activity and updates these fields
+in-memory at runtime.
 
 Pool strategy response:
 
@@ -393,10 +395,9 @@ Pool strategy response:
 }
 ```
 
-Build `0.1.0` exposes the deterministic connection plan before networking is
-enabled. Future Stratum code must hold the active pool persistently, suppress
-reconnect loops inside the configured minimum interval, and follow enabled pool
-priority order for failover.
+The connection plan is deterministic: active pool is the lowest enabled
+priority, reconnect attempts are rate-limited by `reconnect_min_interval`, and
+failover ordering follows enabled priority order.
 
 Job pipeline response:
 
@@ -412,10 +413,9 @@ Job pipeline response:
 }
 ```
 
-Build `0.1.0` does not parse or dispatch real Stratum jobs yet. This endpoint
-sets the runtime contract: keep the pending job queue short, prefer the newest
-pool notify, retire stale work quickly, and reset nonce search when a new
-`prev_hash` arrives.
+Job pipeline policy remains strict in all backends: keep pending queue short,
+prefer newest notify, retire stale work quickly, and reset nonce search when a
+new `prev_hash` arrives.
 
 Stratum status response:
 
@@ -454,10 +454,23 @@ Stratum status response:
 }
 ```
 
-Build `0.1.0` includes a Stratum V1 message classifier for `mining.notify`
-and `mining.set_difficulty`, but does not open sockets, subscribe, authorize,
-dispatch jobs, or submit shares. Future networking code must keep pool secrets
-out of metrics and run local share prechecks before submit.
+`hardware-mining` backend opens a real Stratum V1 socket, sends
+`mining.subscribe`/`mining.authorize`, classifies `mining.notify` and
+`mining.set_difficulty`, dispatches notify jobs to ASIC backend IO, and accepts
+`POST /api/v1/stratum/submit-share` when the safety gate allows live mining.
+`simulated` and `hardware-probe` backends keep submit disabled.
+
+Share submit request example:
+
+```json
+{
+  "worker": "account.worker",
+  "job_id": "job-1",
+  "extranonce2": "00000002",
+  "ntime": "5f5e1000",
+  "nonce": "00000001"
+}
+```
 
 Submit policy response:
 
@@ -538,6 +551,72 @@ Tuning plan response:
 Build `0.1.0` exposes this as a read-only plan. Future autotune must move
 slowly chip-by-chip, run downclock efficiency before upclock stability, and
 touch voltage only after stable frequency results.
+
+Tuning transcript response:
+
+```json
+{
+  "schema_version": 1,
+  "board_family": "xilinx",
+  "chip_id": 0,
+  "base_frequency_mhz": 725,
+  "base_voltage_mv": 800,
+  "frequency_step_mhz": 5,
+  "voltage_step_mv": 5,
+  "frames": [
+    {
+      "order": 1,
+      "phase": "baseline",
+      "command": "set_frequency",
+      "target_frequency_mhz": 725,
+      "target_voltage_mv": 800,
+      "min_duration_seconds": 300,
+      "frame": "omo-asic/xilinx/v1|board=xilinx|cmd=set_frequency|..."
+    }
+  ]
+}
+```
+
+The transcript is read-only. It shows how the planned chip-by-chip sequence
+would be framed for the active board family.
+
+Tuning execution status:
+
+```json
+{
+  "schema_version": 1,
+  "state": "planned_read_only",
+  "autotune": true,
+  "active_phase": "baseline",
+  "current_step": {
+    "order": 1,
+    "phase": "baseline",
+    "command": "set_frequency",
+    "target_frequency_mhz": 725,
+    "target_voltage_mv": 800,
+    "min_duration_seconds": 300
+  },
+  "queued_steps": [
+    {
+      "order": 2,
+      "phase": "downclock_efficiency",
+      "command": "set_frequency",
+      "target_frequency_mhz": 720,
+      "target_voltage_mv": 800,
+      "min_duration_seconds": 300
+    }
+  ],
+  "write_allowed": false,
+  "blocked_reason": "tuning executor is planned but write paths remain gated in build 0.1.0",
+  "notes": [
+    "execution status is derived from the tuning plan, transcript, and safety gate"
+  ]
+}
+```
+
+The execution status exposes the current step queue the runtime would use if
+the write gate were enabled. In build `0.1.0` it remains read-only and tracks
+the same baseline, downclock, upclock, then voltage-trim order.
 
 ## Contribution
 

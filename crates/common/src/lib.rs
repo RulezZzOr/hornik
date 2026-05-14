@@ -61,8 +61,9 @@ pub use stratum::{
 };
 pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{
-    ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningGuardrails, TuningMode,
-    TuningPhase, TuningPlanResponse, TuningPlanState, TuningStep, TuningTargetType,
-    profile_catalog, tuning_plan_steps,
+    ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningExecutionState,
+    TuningExecutionStatus, TuningExecutionStep, TuningGuardrails, TuningMode, TuningPhase,
+    TuningPlanResponse, TuningPlanState, TuningProtocolFrame, TuningProtocolSequenceSpec,
+    TuningProtocolTranscript, TuningStep, TuningTargetType, profile_catalog, tuning_plan_steps,
 };
 pub use update::{SlotInfo, SlotState, UpdateStatus};

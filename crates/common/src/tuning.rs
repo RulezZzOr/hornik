@@ -1,3 +1,4 @@
+use crate::BoardFamily;
 use crate::MinerMode;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -178,6 +179,78 @@ impl From<TuningConfig> for TuningPlanResponse {
             ],
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TuningProtocolFrame {
+    pub order: u8,
+    pub phase: TuningPhase,
+    pub command: String,
+    pub target_frequency_mhz: u16,
+    pub target_voltage_mv: u16,
+    pub min_duration_seconds: u32,
+    pub frame: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TuningProtocolTranscript {
+    pub schema_version: u8,
+    pub board_family: BoardFamily,
+    pub chip_id: u16,
+    pub base_frequency_mhz: u16,
+    pub base_voltage_mv: u16,
+    pub frequency_step_mhz: u16,
+    pub voltage_step_mv: u16,
+    pub frames: Vec<TuningProtocolFrame>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TuningProtocolSequenceSpec {
+    pub board_family: BoardFamily,
+    pub chip_id: u16,
+    pub phases: Vec<TuningPhase>,
+    pub base_frequency_mhz: u16,
+    pub base_voltage_mv: u16,
+    pub frequency_step_mhz: u16,
+    pub voltage_step_mv: u16,
+    pub min_step_duration_seconds: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TuningExecutionState {
+    Disabled,
+    PlannedReadOnly,
+    ReadyToArm,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TuningExecutionStep {
+    pub order: u8,
+    pub phase: TuningPhase,
+    pub command: String,
+    pub target_frequency_mhz: u16,
+    pub target_voltage_mv: u16,
+    pub min_duration_seconds: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TuningExecutionStatus {
+    pub schema_version: u8,
+    pub state: TuningExecutionState,
+    pub autotune: bool,
+    pub active_phase: Option<TuningPhase>,
+    pub current_step: Option<TuningExecutionStep>,
+    pub queued_steps: Vec<TuningExecutionStep>,
+    pub write_allowed: bool,
+    pub blocked_reason: Option<String>,
+    pub notes: Vec<String>,
+}
+
+impl TuningExecutionStatus {
+    pub const SCHEMA_VERSION: u8 = 1;
 }
 
 impl From<TuningConfig> for ProfilesResponse {

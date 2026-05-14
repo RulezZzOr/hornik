@@ -602,6 +602,27 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Tuning Transcript</h2>
+                <span class="state" id="tuning-transcript-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Board</div>
+                  <div class="kv-value" id="tuning-transcript-board">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Chip</div>
+                  <div class="kv-value" id="tuning-transcript-chip">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Frames</div>
+                  <div class="kv-value" id="tuning-transcript-frames">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Stratum</h2>
                 <span class="state" id="stratum-state">--</span>
               </div>
@@ -665,6 +686,31 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Tuning Execution</h2>
+                <span class="state" id="tuning-execution-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Current</div>
+                  <div class="kv-value" id="tuning-execution-current">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Queued</div>
+                  <div class="kv-value" id="tuning-execution-queued">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Write Gate</div>
+                  <div class="kv-value" id="tuning-execution-write">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Blocked</div>
+                  <div class="kv-value" id="tuning-execution-blocked">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Update Slots</h2>
                 <span class="state" id="rollback">--</span>
               </div>
@@ -706,6 +752,8 @@
         lastOverview: null,
         hardware: null,
         probe: null,
+        execution: null,
+        transcript: null,
         events: [],
       };
 
@@ -742,12 +790,20 @@
           .replace(/'/g, "&#039;");
 
       async function refresh() {
-        const [overviewResponse, hardwareResponse, probeResponse] = await Promise.all([
+        const [
+          overviewResponse,
+          hardwareResponse,
+          probeResponse,
+          executionResponse,
+          transcriptResponse,
+        ] = await Promise.all([
           fetch("/api/v1/overview", { cache: "no-store" }),
           state.hardware
             ? Promise.resolve(null)
             : fetch("/api/v1/hardware/targets", { cache: "no-store" }),
           fetch("/api/v1/hardware/probe", { cache: "no-store" }),
+          fetch("/api/v1/tuning/execution", { cache: "no-store" }),
+          fetch("/api/v1/tuning/transcript", { cache: "no-store" }),
         ]);
         if (!overviewResponse.ok) {
           throw new Error(`overview failed: ${overviewResponse.status}`);
@@ -763,6 +819,8 @@
           state.hardware = await hardwareResponse.json();
         }
         state.probe = await probeResponse.json();
+        state.execution = await executionResponse.json();
+        state.transcript = await transcriptResponse.json();
         state.lastOverview = overview;
         state.events = uniqueEvents(overview.events.events.slice().reverse()).slice(0, 8);
         render(overview);
@@ -783,6 +841,8 @@
         renderReadiness(overview.readiness);
         renderTuning(overview.profiles);
         renderTuningPlan(overview.tuning_plan);
+        renderTuningExecution(state.execution);
+        renderTuningTranscript(state.transcript);
         renderSlots(overview.update);
         renderHardware(state.hardware);
         renderProbe(state.probe);
@@ -1030,6 +1090,67 @@
           "tuning-steps",
           plan.steps
             .map((step) => `${step.order}. ${step.phase}`)
+            .join(" -> "),
+        );
+      }
+
+      function renderTuningExecution(execution) {
+        if (!execution) {
+          text("tuning-execution-state", "--");
+          text("tuning-execution-current", "--");
+          text("tuning-execution-queued", "--");
+          text("tuning-execution-write", "--");
+          text("tuning-execution-blocked", "--");
+          return;
+        }
+
+        text("tuning-execution-state", execution.state);
+        text(
+          "tuning-execution-current",
+          execution.current_step
+            ? `${execution.current_step.order}. ${execution.current_step.phase} @ ${execution.current_step.target_frequency_mhz} MHz / ${execution.current_step.target_voltage_mv} mV`
+            : "--",
+        );
+        text(
+          "tuning-execution-queued",
+          execution.queued_steps.length
+            ? execution.queued_steps
+                .map(
+                  (step) =>
+                    `${step.order}. ${step.phase} @ ${step.target_frequency_mhz} MHz / ${step.target_voltage_mv} mV`,
+                )
+                .join(" -> ")
+            : "--",
+        );
+        text("tuning-execution-write", bool(execution.write_allowed));
+        text("tuning-execution-blocked", execution.blocked_reason ?? "--");
+      }
+
+      function renderTuningTranscript(transcript) {
+        if (!transcript) {
+          text("tuning-transcript-state", "--");
+          text("tuning-transcript-board", "--");
+          text("tuning-transcript-chip", "--");
+          text("tuning-transcript-frames", "--");
+          return;
+        }
+
+        text("tuning-transcript-state", `v${transcript.schema_version}`);
+        text(
+          "tuning-transcript-board",
+          `${transcript.board_family} / base ${transcript.base_frequency_mhz} MHz @ ${transcript.base_voltage_mv} mV`,
+        );
+        text(
+          "tuning-transcript-chip",
+          `chip ${transcript.chip_id} / step ${transcript.frequency_step_mhz} MHz + ${transcript.voltage_step_mv} mV`,
+        );
+        text(
+          "tuning-transcript-frames",
+          transcript.frames
+            .map(
+              (frame) =>
+                `${frame.order}. ${frame.command} @ ${frame.target_frequency_mhz} MHz / ${frame.target_voltage_mv} mV (${formatSeconds(frame.min_duration_seconds)})`,
+            )
             .join(" -> "),
         );
       }

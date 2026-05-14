@@ -11,5 +11,5 @@ openmineros-board-aml = { path = "../board-aml" }
 openmineros-board-bb = { path = "../board-bb" }
 openmineros-board-xil = { path = "../board-xil" }
 openmineros-common = { path = "../common" }
+sha2.workspace = true
 thiserror.workspace = true
-

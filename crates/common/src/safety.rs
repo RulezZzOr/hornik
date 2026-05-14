@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum HardwareSafetyState {
     SimulationOnly,
     HardwareProbeReadOnly,
+    HardwareMiningEnabled,
     BlockedIdentityConflict,
     BlockedUnknownIdentity,
     BlockedUnsupportedTarget,
@@ -89,6 +90,20 @@ pub fn evaluate_hardware_safety(
                     .to_string(),
             ],
         },
+        RuntimeBackendMode::HardwareMining => HardwareSafetyGate {
+            state: HardwareSafetyState::HardwareMiningEnabled,
+            configured_target_accepted: true,
+            identity_confirmed: identity_confirmed(identity),
+            simulated_mining_allowed: false,
+            hardware_mining_allowed: true,
+            asic_bus_writes_allowed: true,
+            tuning_writes_allowed: false,
+            flashing_allowed: false,
+            reasons: vec![
+                "hardware-mining backend enables live stratum and asic dispatch".to_string(),
+                "tuning writes and flashing remain disabled in build 0.1.0".to_string(),
+            ],
+        },
     }
 }
 
@@ -154,6 +169,27 @@ mod tests {
         assert!(gate.identity_confirmed);
         assert!(!gate.hardware_mining_allowed);
         assert!(!gate.tuning_writes_allowed);
+    }
+
+    #[test]
+    fn hardware_mining_enables_live_dispatch_without_tuning_or_flashing() {
+        let mut identity = HardwareIdentityReport::simulated(BoardFamily::Xilinx, Model::S19jPro);
+        identity.backend = RuntimeBackendMode::HardwareMining;
+        identity.state = HardwareIdentityState::Inferred;
+        identity.confidence = HardwareIdentityConfidence::High;
+        identity.detected_board = Some(BoardFamily::Xilinx);
+        identity.detected_model = Some(Model::S19jPro);
+        let gate = evaluate_hardware_safety(
+            RuntimeBackendMode::HardwareMining,
+            SupportLevel::MvpStable,
+            &identity,
+        );
+
+        assert_eq!(gate.state, HardwareSafetyState::HardwareMiningEnabled);
+        assert!(gate.hardware_mining_allowed);
+        assert!(gate.asic_bus_writes_allowed);
+        assert!(!gate.tuning_writes_allowed);
+        assert!(!gate.flashing_allowed);
     }
 
     #[test]

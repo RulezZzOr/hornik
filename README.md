@@ -21,6 +21,8 @@ Build `0.1.0` is a safe development baseline:
 - Read-only Stratum V1 engine contract with no sockets opened in build `0.1.0`.
 - Validated tuning profile config with read-only profile API.
 - Read-only autotune plan: baseline, downclock efficiency, upclock stability, then voltage trim.
+- Read-only tuning transcript API for chip-by-chip command previews with structured targets.
+- Read-only tuning execution status API that shows the current step, queue, and write gate.
 - Deterministic in-memory event snapshot API.
 - WebSocket event snapshot and heartbeat API.
 - Redacted support bundle API.
@@ -70,6 +72,7 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/chains`
 - `GET /api/v1/stratum/status`
 - `GET /api/v1/stratum/submit-policy`
+- `GET /api/v1/tuning/transcript`
 - `GET /api/v1/contribution/status`
 - `GET /api/v1/pools/strategy`
 - `GET /metrics`
@@ -82,6 +85,8 @@ They are intentionally not flashable firmware images.
 The control plane defaults to the `simulated` backend for local development.
 For board bring-up work, `hardware-probe` exposes the same API shape but stays
 read-only and reports zero hashrate until ASIC bus probing is implemented.
+`hardware-mining` enables live Stratum V1 socket/session handling plus ASIC job
+dispatch over the board UART path.
 `GET /api/v1/hardware/probe` checks expected OS paths only; it does not issue
 GPIO, UART, fan, voltage, clock, pool, or ASIC commands.
 `GET /api/v1/hardware/identity` compares the configured board/model with
@@ -90,6 +95,8 @@ read-only evidence and never auto-switches the target in build `0.1.0`.
 writes, and ASIC bus writes disabled until the backend implements those paths.
 `GET /api/v1/hardware/readiness` rolls target support, recovery method,
 capabilities, and the safety gate into one operator-facing status report.
+`POST /api/v1/stratum/submit-share` performs local precheck and submits share
+payloads to the active pool when the safety gate allows live mining.
 
 ```bash
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro

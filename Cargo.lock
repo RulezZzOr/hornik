@@ -522,6 +522,7 @@ dependencies = [
  "openmineros-board-bb",
  "openmineros-board-xil",
  "openmineros-common",
+ "sha2",
  "thiserror",
 ]
 
@@ -579,6 +580,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]

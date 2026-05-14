@@ -103,6 +103,10 @@ fn readiness_state(
             HardwareReadinessState::ReadOnlyIdentified
         }
         (RuntimeBackendMode::HardwareProbe, _, _) => HardwareReadinessState::ReadOnlyNeedsIdentity,
+        (RuntimeBackendMode::HardwareMining, HardwareSafetyState::HardwareMiningEnabled, true) => {
+            HardwareReadinessState::ReadOnlyIdentified
+        }
+        (RuntimeBackendMode::HardwareMining, _, _) => HardwareReadinessState::ReadOnlyNeedsIdentity,
     }
 }
 

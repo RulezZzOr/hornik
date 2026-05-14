@@ -2,7 +2,7 @@ use crate::{
     ChainStatus, ContributionStatus, EventsResponse, HardwareIdentityReport,
     HardwareReadinessReport, HardwareSafetyGate, HealthStatusResponse, JobPipelinePolicy,
     MinerStatus, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary, ProfilesResponse,
-    StratumEngineStatus, SystemInfo, TuningPlanResponse, UpdateStatus,
+    StratumEngineStatus, SystemInfo, TuningExecutionStatus, TuningPlanResponse, UpdateStatus,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +23,7 @@ pub struct DashboardOverview {
     pub pool_strategy: PoolStrategyResponse,
     pub profiles: ProfilesResponse,
     pub tuning_plan: TuningPlanResponse,
+    pub tuning_execution: TuningExecutionStatus,
     pub contribution: ContributionStatus,
     pub update: UpdateStatus,
     pub events: EventsResponse,
