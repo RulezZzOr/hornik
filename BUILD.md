@@ -1,6 +1,7 @@
 # Build
 
-Build `0.1.0` provides local development builds, tests, and non-flashable board artefacts.
+Build `0.1.0` provides local development builds, tests, and non-flashable board
+artefacts with a packaged device-side runtime layout.
 
 ## Requirements
 
@@ -20,6 +21,7 @@ make artifact-budget
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- validate-config --config config/default.toml
 make image BOARD=s19-xil MODEL=s19j-pro
+make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
@@ -68,8 +70,8 @@ Override with `CONTROL_PLANE_MAX_BYTES`, `COMMANDER_MAX_BYTES`, or
 
 ## Artefact Budget
 
-CI also generates development placeholder artefacts for `s19-xil`, `s19-bb`,
-and `s19-aml`, then checks each manifest with:
+CI also generates install bundles for `s19-xil`, `s19-bb`, and `s19-aml`, then
+checks each manifest with:
 
 ```bash
 ./scripts/check-artifact-budget.sh

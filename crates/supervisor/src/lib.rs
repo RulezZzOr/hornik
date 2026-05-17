@@ -4,15 +4,17 @@ use openmineros_asic_backend::{
 };
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardFamily, ChainStatus, ContributionConfig, ContributionStatus, EventBuilder, EventSeverity,
-    EventsResponse, HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport,
-    HardwareReadinessState, HardwareSafetyGate, HealthStatus, JobPipelinePolicy, MinerStatus,
-    Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeState, PoolRuntimeSummary,
-    PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode, RuntimeConfig,
-    Severity, SharePrecheckResult, ShareValidationMode, StratumConnectionState, StratumEngineState,
-    StratumEngineStatus, StratumMessageKind, StratumShareCandidate, StratumSubmitPolicy,
-    SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig, TuningExecutionState,
-    TuningExecutionStatus, TuningPhase, TuningPlanResponse, TuningProtocolSequenceSpec,
+    BoardControlState, BoardFamily, ChainStatus, ContributionConfig, ContributionStatus,
+    EventBuilder, EventSeverity, EventsResponse, FirmwareDeploymentReport, FirmwareGap,
+    FirmwareGapState, HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport,
+    HardwareReadinessState, HardwareSafetyGate, HealthStatus, JobPipelinePolicy,
+    LockedTuningProfile, MinerStatus, Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeState,
+    PoolRuntimeSummary, PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode,
+    RuntimeConfig, RuntimeControlReport, Severity, SharePrecheckResult, SharePrecheckVerdict,
+    ShareValidationMode, StratumConnectionState, StratumEngineState, StratumEngineStatus,
+    StratumMessageKind, StratumShareCandidate, StratumSubmitPolicy, SupportBundle,
+    SupportBundlePrivacy, SystemInfo, TuningConfig, TuningExecutionState, TuningExecutionStatus,
+    TuningLockState, TuningPhase, TuningPlanResponse, TuningProtocolSequenceSpec,
     TuningProtocolTranscript, UpdateStatus, classify_stratum_message, evaluate_hardware_readiness,
     evaluate_hardware_safety, plan_pool_strategy, precheck_share_submit, summarize_pool_runtime,
     summarize_pools,
@@ -32,9 +34,18 @@ pub struct Supervisor {
     active_slot: String,
     contribution: ContributionConfig,
     tuning: TuningConfig,
+    control: Mutex<RuntimeControlState>,
     pools: Vec<PoolConfig>,
     pool_policy: PoolConnectionPolicy,
     stratum_engine: Mutex<StratumEngine>,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeControlState {
+    board_paused: bool,
+    pause_reason: Option<String>,
+    tuning_locked: bool,
+    locked_profile: Option<LockedTuningProfile>,
 }
 
 impl Supervisor {
@@ -76,6 +87,12 @@ impl Supervisor {
             active_slot: "slot_a".to_string(),
             contribution: config.contribution,
             tuning: config.tuning,
+            control: Mutex::new(RuntimeControlState {
+                board_paused: false,
+                pause_reason: None,
+                tuning_locked: false,
+                locked_profile: None,
+            }),
             pools,
             pool_policy,
             stratum_engine: Mutex::new(stratum_engine),
@@ -102,6 +119,7 @@ impl Supervisor {
     pub fn health(&self) -> HealthStatusResponse {
         let support = self.backend.support();
         let runtime = self.backend.runtime_status();
+        let control = self.control_state();
         let mut issues = Vec::new();
         let support_severity = match support {
             openmineros_common::SupportLevel::MvpStable => Severity::Ok,
@@ -115,10 +133,29 @@ impl Supervisor {
             }
         };
         issues.extend(runtime.issues);
-        let severity = max_severity(support_severity, runtime.severity);
+        if control.board_paused {
+            issues.push(
+                control
+                    .pause_reason
+                    .unwrap_or_else(|| "board is paused by operator".to_string()),
+            );
+        }
+        let severity = if control.board_paused {
+            max_severity(
+                max_severity(support_severity, runtime.severity),
+                Severity::Warn,
+            )
+        } else {
+            max_severity(support_severity, runtime.severity)
+        };
+        let state = if control.board_paused {
+            HealthStatus::SafeMode
+        } else {
+            runtime.state
+        };
 
         HealthStatusResponse {
-            state: runtime.state,
+            state,
             severity,
             issues,
             active_slot: self.active_slot.clone(),
@@ -128,8 +165,21 @@ impl Supervisor {
 
     pub fn miner_status(&self) -> MinerStatus {
         let mut status = self.backend.miner_status();
-        if self.backend.mode() == RuntimeBackendMode::Simulated {
+        let control = self.control_state();
+        if control.board_paused {
+            status.hashrate_ths = 0.0;
+            status.power_w = 0;
+            status.efficiency_j_th = 0.0;
+            status.mode = openmineros_common::MinerMode::SafeMode;
+            status.paused = true;
+            status.pause_reason = control.pause_reason;
+        } else if self.backend.mode() == RuntimeBackendMode::Simulated {
+            status.paused = false;
+            status.pause_reason = None;
             status.mode = self.tuning.mode.into();
+        } else {
+            status.paused = false;
+            status.pause_reason = None;
         }
         status
     }
@@ -164,6 +214,97 @@ impl Supervisor {
         )
     }
 
+    pub fn runtime_control_report(&self) -> RuntimeControlReport {
+        let control = self
+            .control
+            .lock()
+            .expect("runtime control mutex poisoned")
+            .clone();
+
+        RuntimeControlReport {
+            schema_version: RuntimeControlReport::SCHEMA_VERSION,
+            board_family: self.backend.profile().family,
+            model: self.backend.model(),
+            board_state: if control.board_paused {
+                BoardControlState::Paused
+            } else {
+                BoardControlState::Running
+            },
+            board_paused: control.board_paused,
+            pause_reason: control.pause_reason,
+            tuning_lock_state: if control.tuning_locked {
+                TuningLockState::Locked
+            } else {
+                TuningLockState::Searching
+            },
+            tuning_locked: control.tuning_locked,
+            locked_profile: control.locked_profile,
+            notes: vec![
+                "board pause suspends ASIC dispatch without restarting the miner process"
+                    .to_string(),
+                "tuning lock freezes the discovered profile until the operator unlocks it"
+                    .to_string(),
+            ],
+        }
+    }
+
+    pub fn pause_board(&self, reason: Option<String>) -> RuntimeControlReport {
+        let mut control = self.control.lock().expect("runtime control mutex poisoned");
+        control.board_paused = true;
+        control.pause_reason = reason;
+        drop(control);
+        self.runtime_control_report()
+    }
+
+    pub fn resume_board(&self) -> RuntimeControlReport {
+        let mut control = self.control.lock().expect("runtime control mutex poisoned");
+        control.board_paused = false;
+        control.pause_reason = None;
+        drop(control);
+        self.runtime_control_report()
+    }
+
+    pub fn lock_tuning_profile(&self) -> RuntimeControlReport {
+        let plan = self.tuning_plan();
+        let transcript = self.tuning_transcript();
+        let mut control = self.control.lock().expect("runtime control mutex poisoned");
+        control.tuning_locked = true;
+        control.locked_profile = Some(LockedTuningProfile {
+            mode: self.tuning.mode,
+            target_type: self.tuning.target_type,
+            target_value: self.tuning.target_value,
+            base_frequency_mhz: transcript.base_frequency_mhz,
+            base_voltage_mv: transcript.base_voltage_mv,
+            source: if self.tuning.autotune {
+                format!(
+                    "locked from autotune plan after {}",
+                    plan.active_phase
+                        .map(|phase| format!("{phase:?}"))
+                        .unwrap_or_else(|| "plan review".to_string())
+                )
+            } else {
+                "locked from operator-selected profile".to_string()
+            },
+        });
+        drop(control);
+        self.runtime_control_report()
+    }
+
+    pub fn unlock_tuning_profile(&self) -> RuntimeControlReport {
+        let mut control = self.control.lock().expect("runtime control mutex poisoned");
+        control.tuning_locked = false;
+        control.locked_profile = None;
+        drop(control);
+        self.runtime_control_report()
+    }
+
+    fn control_state(&self) -> RuntimeControlState {
+        self.control
+            .lock()
+            .expect("runtime control mutex poisoned")
+            .clone()
+    }
+
     pub fn contribution_status(&self) -> ContributionStatus {
         ContributionStatus::from(self.contribution)
     }
@@ -175,13 +316,14 @@ impl Supervisor {
     pub fn pool_runtime(&self) -> PoolRuntimeSummary {
         let mut runtime = summarize_pool_runtime(&self.pools, self.pool_policy);
         let safety = self.hardware_safety_gate();
+        let control = self.control_state();
         let mut engine = self
             .stratum_engine
             .lock()
             .expect("stratum engine mutex poisoned");
         engine.poll(
             self.backend.mode() == RuntimeBackendMode::HardwareMining,
-            safety.hardware_mining_allowed,
+            safety.hardware_mining_allowed && !control.board_paused,
         );
         runtime.active_priority = engine.status.active_pool_priority;
         runtime.reconnects_total = engine.reconnects_total;
@@ -204,15 +346,23 @@ impl Supervisor {
 
     pub fn stratum_status(&self) -> StratumEngineStatus {
         let safety = self.hardware_safety_gate();
+        let control = self.control_state();
         let mut engine = self
             .stratum_engine
             .lock()
             .expect("stratum engine mutex poisoned");
         engine.poll(
             self.backend.mode() == RuntimeBackendMode::HardwareMining,
-            safety.hardware_mining_allowed,
+            safety.hardware_mining_allowed && !control.board_paused,
         );
-        engine.status.clone()
+        let mut status = engine.status.clone();
+        if control.board_paused {
+            status.notes.push(
+                "board is paused by operator; live socket may remain open but ASIC dispatch is suspended"
+                    .to_string(),
+            );
+        }
+        status
     }
 
     pub fn stratum_submit_policy(&self) -> StratumSubmitPolicy {
@@ -221,6 +371,18 @@ impl Supervisor {
 
     pub fn submit_share(&self, candidate: StratumShareCandidate) -> SharePrecheckResult {
         let safety = self.hardware_safety_gate();
+        let control = self.control_state();
+        if control.board_paused {
+            return SharePrecheckResult {
+                verdict: SharePrecheckVerdict::RejectedBoardPaused,
+                submit_allowed: false,
+                reasons: vec![
+                    control
+                        .pause_reason
+                        .unwrap_or_else(|| "board is paused by operator".to_string()),
+                ],
+            };
+        }
         let mut engine = self
             .stratum_engine
             .lock()
@@ -283,6 +445,7 @@ impl Supervisor {
         let plan = self.tuning_plan();
         let safety = self.hardware_safety_gate();
         let transcript = self.tuning_transcript();
+        let control = self.runtime_control_report();
         let write_allowed = safety.tuning_writes_allowed;
         let state = if !self.tuning.autotune {
             TuningExecutionState::Disabled
@@ -346,6 +509,155 @@ impl Supervisor {
                     .to_string(),
                 "build 0.1.0 exposes the sequence read-only until tuning writes are implemented"
                     .to_string(),
+                if control.tuning_locked {
+                    "current tuning profile is locked and will not change until the operator unlocks it"
+                        .to_string()
+                } else {
+                    "current tuning profile remains editable through runtime control".to_string()
+                },
+            ],
+        }
+    }
+
+    pub fn firmware_deployment_report(&self) -> FirmwareDeploymentReport {
+        let probe = self.hardware_probe_report();
+        let identity = self.hardware_identity_report();
+        let readiness = self.hardware_readiness_report();
+        let safety = self.hardware_safety_gate();
+        let tuning = self.tuning_execution_status();
+
+        let mut gaps = vec![
+            FirmwareGap {
+                key: "asic_transport".to_string(),
+                title: "Real ASIC transport".to_string(),
+                state: FirmwareGapState::Missing,
+                detail:
+                    "The backend still writes framed bytes to a UART path; there is no device-side ASIC driver or chip scheduler yet."
+                        .to_string(),
+            },
+            FirmwareGap {
+                key: "tuning_executor".to_string(),
+                title: "Tuning executor".to_string(),
+                state: if tuning.write_allowed {
+                    FirmwareGapState::Ready
+                } else if tuning.state == TuningExecutionState::PlannedReadOnly {
+                    FirmwareGapState::Partial
+                } else {
+                    FirmwareGapState::Missing
+                },
+                detail:
+                    "Chip-by-chip frequency and voltage writes are still read-only and not armed on real hardware."
+                        .to_string(),
+            },
+            FirmwareGap {
+                key: "thermal_control".to_string(),
+                title: "Thermal control".to_string(),
+                state: FirmwareGapState::Missing,
+                detail:
+                    "Fan curves, chip temperature polling, and thermal shutdown logic are not wired to real sensors yet."
+                        .to_string(),
+            },
+            FirmwareGap {
+                key: "bootable_image".to_string(),
+                title: "Bootable image packaging".to_string(),
+                state: FirmwareGapState::Missing,
+                detail:
+                    "There is no bootable S19 image/rootfs build, init wiring, or installer artifact yet."
+                        .to_string(),
+            },
+            FirmwareGap {
+                key: "signed_updates".to_string(),
+                title: "Signed update flow".to_string(),
+                state: if self.update_status().rollback_available {
+                    FirmwareGapState::Partial
+                } else {
+                    FirmwareGapState::Missing
+                },
+                detail:
+                    "Update status exists, but flashing, slot writes, and signed install/rollback flows are not implemented."
+                        .to_string(),
+            },
+            FirmwareGap {
+                key: "target_readiness".to_string(),
+                title: "Target readiness".to_string(),
+                state: match readiness.state {
+                    HardwareReadinessState::ReadOnlyIdentified => FirmwareGapState::Ready,
+                    HardwareReadinessState::SimulationReady
+                    | HardwareReadinessState::ReadOnlyNeedsIdentity => FirmwareGapState::Partial,
+                    HardwareReadinessState::Blocked => FirmwareGapState::Missing,
+                },
+                detail: match readiness.state {
+                    HardwareReadinessState::ReadOnlyIdentified => {
+                        "The configured S19 target is identified and the safety gate is aligned with the board profile."
+                            .to_string()
+                    }
+                    HardwareReadinessState::SimulationReady => {
+                        "The current backend is simulation-only; it is not a deploy target."
+                            .to_string()
+                    }
+                    HardwareReadinessState::ReadOnlyNeedsIdentity => {
+                        "The target needs stronger identity confirmation before any hardware-facing deployment."
+                            .to_string()
+                    }
+                    HardwareReadinessState::Blocked => {
+                        "The configured target is blocked by safety policy or unsupported hardware."
+                            .to_string()
+                    }
+                },
+            },
+            FirmwareGap {
+                key: "physical_probe".to_string(),
+                title: "Physical S19 probe".to_string(),
+                state: if probe.summary.missing_required == 0
+                    && identity.state == openmineros_common::HardwareIdentityState::Inferred
+                {
+                    FirmwareGapState::Ready
+                } else if probe.safe_read_only {
+                    FirmwareGapState::Partial
+                } else {
+                    FirmwareGapState::Missing
+                },
+                detail: if probe.summary.missing_required == 0
+                    && identity.state == openmineros_common::HardwareIdentityState::Inferred
+                {
+                    "Mounted-root or live-host probe evidence is sufficient to confirm the S19 variant."
+                        .to_string()
+                } else {
+                    "Read-only evidence is available, but not all expected S19 paths or identity signals are confirmed yet."
+                        .to_string()
+                },
+            },
+        ];
+
+        if safety.state == openmineros_common::HardwareSafetyState::HardwareMiningEnabled {
+            gaps.push(FirmwareGap {
+                key: "hardware_gate".to_string(),
+                title: "Hardware write gate".to_string(),
+                state: if safety.tuning_writes_allowed && safety.flashing_allowed {
+                    FirmwareGapState::Ready
+                } else {
+                    FirmwareGapState::Partial
+                },
+                detail:
+                    "The runtime can enter hardware-mining mode, but tuning writes and flashing are still blocked."
+                        .to_string(),
+            });
+        }
+
+        let deployable = gaps.iter().all(|gap| gap.state == FirmwareGapState::Ready);
+
+        FirmwareDeploymentReport {
+            schema_version: FirmwareDeploymentReport::SCHEMA_VERSION,
+            backend: self.backend.mode(),
+            board_family: self.backend.profile().family,
+            model: self.backend.model(),
+            probe_root: probe.probe_root.clone(),
+            deployable,
+            gaps,
+            notes: vec![
+                "build 0.1.0 is still missing the real device-side firmware runtime".to_string(),
+                "the report lists the pieces that must exist before a usable S19 image can ship"
+                    .to_string(),
             ],
         }
     }
@@ -366,6 +678,7 @@ impl Supervisor {
         let profiles = self.profiles();
         let tuning_plan = self.tuning_plan();
         let tuning_execution = self.tuning_execution_status();
+        let control = self.runtime_control_report();
 
         events.push(
             EventSeverity::Info,
@@ -571,6 +884,29 @@ impl Supervisor {
             }),
         );
 
+        events.push(
+            if control.board_paused {
+                EventSeverity::Warn
+            } else {
+                EventSeverity::Info
+            },
+            "runtime.control_state",
+            "control",
+            if control.board_paused {
+                "board pause is active and ASIC dispatch is suspended"
+            } else {
+                "board is running and tuning lock state is tracked"
+            },
+            json!({
+                "board_state": control.board_state,
+                "board_paused": control.board_paused,
+                "pause_reason": control.pause_reason,
+                "tuning_lock_state": control.tuning_lock_state,
+                "tuning_locked": control.tuning_locked,
+                "locked_profile": control.locked_profile,
+            }),
+        );
+
         if pools.enabled == 0 {
             events.push(
                 EventSeverity::Warn,
@@ -638,6 +974,7 @@ impl Supervisor {
             identity: self.hardware_identity_report(),
             safety: self.hardware_safety_gate(),
             readiness: self.hardware_readiness_report(),
+            control: self.runtime_control_report(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -665,6 +1002,7 @@ impl Supervisor {
             identity: self.hardware_identity_report(),
             safety: self.hardware_safety_gate(),
             readiness: self.hardware_readiness_report(),
+            control: self.runtime_control_report(),
             health: self.health(),
             miner: self.miner_status(),
             job_pipeline: self.job_pipeline(),
@@ -687,6 +1025,7 @@ impl Supervisor {
         let identity = self.hardware_identity_report();
         let safety = self.hardware_safety_gate();
         let readiness = self.hardware_readiness_report();
+        let control = self.runtime_control_report();
         let health = self.health();
         let miner = self.miner_status();
         let job_pipeline = self.job_pipeline();
@@ -742,6 +1081,16 @@ impl Supervisor {
             &mut output,
             "omo_hardware_safety_flashing_allowed",
             bool_value(safety.flashing_allowed),
+        );
+        metric(
+            &mut output,
+            "omo_runtime_board_paused",
+            bool_value(control.board_paused),
+        );
+        metric(
+            &mut output,
+            "omo_runtime_tuning_locked",
+            bool_value(control.tuning_locked),
         );
         labeled_metric(
             &mut output,

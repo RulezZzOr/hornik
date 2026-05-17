@@ -5,6 +5,7 @@ board="${1:?board is required}"
 model="${2:?model is required}"
 version="${3:?version is required}"
 dist_dir="${4:-dist}"
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 case "$board" in
   s19-xil|s19-bb|s19-aml) ;;
@@ -23,14 +24,53 @@ case "$model" in
 esac
 
 mkdir -p "$dist_dir"
+dist_abs="$(cd "$dist_dir" && pwd)"
 name="openmineros-${board}-${model}-${version}"
-manifest="$dist_dir/${name}-manifest.json"
-image="$dist_dir/${name}-install.img.xz"
+manifest="$dist_abs/${name}-manifest.json"
+image="$dist_abs/${name}-install.img.xz"
+rootfs="$dist_abs/${name}-rootfs"
+overlay="$script_dir/../buildroot/board/common/overlay"
 
-printf '%s\n' "OpenMinerOS $version placeholder artefact" \
-  "board=$board" \
-  "model=$model" \
-  "flashable=false" > "$image"
+if ! command -v xz >/dev/null 2>&1; then
+  echo "xz is required to build install images" >&2
+  exit 2
+fi
+
+rm -rf "$rootfs"
+mkdir -p "$rootfs"
+
+if [ -d "$overlay" ]; then
+  cp -R "$overlay"/. "$rootfs"/
+fi
+
+mkdir -p "$rootfs/etc/openmineros" "$rootfs/usr/share/openmineros" "$rootfs/var/log/openmineros"
+
+cat > "$rootfs/etc/openmineros/release.json" <<EOF_RELEASE
+{
+  "name": "OpenMinerOS",
+  "version": "$version",
+  "board": "$board",
+  "model": "$model",
+  "runtime_backend": "hardware-probe",
+  "flashable": false
+}
+EOF_RELEASE
+
+cat > "$rootfs/usr/share/openmineros/install-readme.txt" <<EOF_README
+OpenMinerOS $version install bundle
+board=$board
+model=$model
+flashable=false
+This bundle contains the device-side runtime layout and safe boot hooks.
+EOF_README
+
+find "$rootfs" -exec touch -t 197001010000 {} +
+(
+  cd "$rootfs"
+  find . -type f | LC_ALL=C sort > "$dist_abs/${name}-filelist.txt"
+  tar -cf - -T "$dist_abs/${name}-filelist.txt" | xz -c > "$image"
+)
+rm -f "$dist_abs/${name}-filelist.txt"
 
 image_file="$(basename "$image")"
 image_sha256="$(sha256sum "$image" | awk '{print $1}')"
@@ -43,7 +83,7 @@ cat > "$manifest" <<EOF_MANIFEST
   "version": "$version",
   "board": "$board",
   "model": "$model",
-  "kind": "development-placeholder",
+  "kind": "development-install-bundle",
   "flashable": false,
   "artifacts": [
     {
@@ -54,7 +94,7 @@ cat > "$manifest" <<EOF_MANIFEST
     }
   ],
   "signature": null,
-  "warning": "This is not a real firmware image. It is a reproducible build pipeline placeholder for OpenMinerOS 0.1.0."
+  "warning": "This is not a flashable firmware image yet. It packages the device-side runtime layout and safe boot hooks for OpenMinerOS 0.1.0."
 }
 EOF_MANIFEST
 

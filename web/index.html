@@ -711,6 +711,57 @@
 
             <section class="panel">
               <div class="panel-head">
+                <h2>Runtime Control</h2>
+                <span class="state" id="runtime-board-state">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Pause</div>
+                  <div class="kv-value" id="runtime-pause-reason">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Tuning Lock</div>
+                  <div class="kv-value" id="runtime-tuning-lock">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Locked Profile</div>
+                  <div class="kv-value" id="runtime-locked-profile">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Actions</div>
+                  <div class="kv-value">
+                    <button id="runtime-pause-btn" type="button">Pause board</button>
+                    <button id="runtime-resume-btn" type="button">Resume board</button>
+                    <button id="runtime-lock-btn" type="button">Lock tuning</button>
+                    <button id="runtime-unlock-btn" type="button">Unlock tuning</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Firmware Deployment</h2>
+                <span class="state" id="firmware-deployable">--</span>
+              </div>
+              <div class="kv">
+                <div class="kv-row">
+                  <div class="kv-key">Probe Root</div>
+                  <div class="kv-value" id="firmware-probe-root">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Blockers</div>
+                  <div class="kv-value" id="firmware-gaps">--</div>
+                </div>
+                <div class="kv-row">
+                  <div class="kv-key">Notes</div>
+                  <div class="kv-value" id="firmware-notes">--</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
                 <h2>Update Slots</h2>
                 <span class="state" id="rollback">--</span>
               </div>
@@ -752,6 +803,8 @@
         lastOverview: null,
         hardware: null,
         probe: null,
+        control: null,
+        deployment: null,
         execution: null,
         transcript: null,
         events: [],
@@ -794,6 +847,8 @@
           overviewResponse,
           hardwareResponse,
           probeResponse,
+          controlResponse,
+          deploymentResponse,
           executionResponse,
           transcriptResponse,
         ] = await Promise.all([
@@ -802,6 +857,8 @@
             ? Promise.resolve(null)
             : fetch("/api/v1/hardware/targets", { cache: "no-store" }),
           fetch("/api/v1/hardware/probe", { cache: "no-store" }),
+          fetch("/api/v1/runtime/control", { cache: "no-store" }),
+          fetch("/api/v1/firmware/deployment", { cache: "no-store" }),
           fetch("/api/v1/tuning/execution", { cache: "no-store" }),
           fetch("/api/v1/tuning/transcript", { cache: "no-store" }),
         ]);
@@ -814,11 +871,16 @@
         if (!probeResponse.ok) {
           throw new Error(`hardware probe failed: ${probeResponse.status}`);
         }
+        if (!controlResponse.ok) {
+          throw new Error(`runtime control failed: ${controlResponse.status}`);
+        }
         const overview = await overviewResponse.json();
         if (hardwareResponse) {
           state.hardware = await hardwareResponse.json();
         }
         state.probe = await probeResponse.json();
+        state.control = await controlResponse.json();
+        state.deployment = await deploymentResponse.json();
         state.execution = await executionResponse.json();
         state.transcript = await transcriptResponse.json();
         state.lastOverview = overview;
@@ -842,6 +904,8 @@
         renderTuning(overview.profiles);
         renderTuningPlan(overview.tuning_plan);
         renderTuningExecution(state.execution);
+        renderRuntimeControl(state.control);
+        renderFirmwareDeployment(state.deployment);
         renderTuningTranscript(state.transcript);
         renderSlots(overview.update);
         renderHardware(state.hardware);
@@ -1126,6 +1190,63 @@
         text("tuning-execution-blocked", execution.blocked_reason ?? "--");
       }
 
+      function renderRuntimeControl(control) {
+        if (!control) {
+          text("runtime-board-state", "--");
+          text("runtime-pause-reason", "--");
+          text("runtime-tuning-lock", "--");
+          text("runtime-locked-profile", "--");
+          return;
+        }
+
+        const boardState = byId("runtime-board-state");
+        boardState.textContent = control.board_state;
+        boardState.className = `state ${control.board_paused ? "warn" : "ok"}`;
+        text(
+          "runtime-pause-reason",
+          control.board_paused ? control.pause_reason ?? "paused by operator" : "running",
+        );
+        text(
+          "runtime-tuning-lock",
+          control.tuning_locked ? "locked" : "searching",
+        );
+        text(
+          "runtime-locked-profile",
+          control.locked_profile
+            ? `${control.locked_profile.mode} / ${control.locked_profile.target_type}${control.locked_profile.target_value === null ? "" : ` ${control.locked_profile.target_value}` } / ${control.locked_profile.base_frequency_mhz} MHz @ ${control.locked_profile.base_voltage_mv} mV`
+            : "--",
+        );
+      }
+
+      function renderFirmwareDeployment(deployment) {
+        if (!deployment) {
+          text("firmware-deployable", "--");
+          text("firmware-probe-root", "--");
+          text("firmware-gaps", "--");
+          text("firmware-notes", "--");
+          return;
+        }
+
+        const deployable = byId("firmware-deployable");
+        deployable.textContent = deployment.deployable ? "deployable" : "blocked";
+        deployable.className = `state ${deployment.deployable ? "ok" : "warn"}`;
+        text("firmware-probe-root", deployment.probe_root ?? "--");
+        text(
+          "firmware-gaps",
+          deployment.gaps.length
+            ? deployment.gaps
+                .map(
+                  (gap) => `${gap.key}: ${gap.state} - ${gap.title} (${gap.detail})`,
+                )
+                .join(" | ")
+            : "--",
+        );
+        text(
+          "firmware-notes",
+          deployment.notes.length ? deployment.notes.join(" | ") : "--",
+        );
+      }
+
       function renderTuningTranscript(transcript) {
         if (!transcript) {
           text("tuning-transcript-state", "--");
@@ -1285,6 +1406,37 @@
         });
       }
 
+      async function postControl(path) {
+        const response = await fetch(path, {
+          method: "POST",
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`${path} failed: ${response.status}`);
+        }
+        await refresh();
+      }
+
+      function initControlButtons() {
+        byId("runtime-pause-btn").addEventListener("click", () => {
+          postControl("/api/v1/board/pause").catch(showError);
+        });
+        byId("runtime-resume-btn").addEventListener("click", () => {
+          postControl("/api/v1/board/resume").catch(showError);
+        });
+        byId("runtime-lock-btn").addEventListener("click", () => {
+          postControl("/api/v1/tuning/lock").catch(showError);
+        });
+        byId("runtime-unlock-btn").addEventListener("click", () => {
+          postControl("/api/v1/tuning/unlock").catch(showError);
+        });
+      }
+
+      function showError(error) {
+        text("live-state", "api error");
+        text("health-meta", error.message);
+      }
+
       function connectEvents() {
         const protocol = location.protocol === "https:" ? "wss:" : "ws:";
         const socket = new WebSocket(`${protocol}//${location.host}/api/v1/ws`);
@@ -1307,17 +1459,12 @@
         });
       }
 
+      initControlButtons();
       refresh()
         .then(connectEvents)
-        .catch((error) => {
-          text("live-state", "api error");
-          text("health-meta", error.message);
-        });
+        .catch(showError);
       window.setInterval(() => {
-        refresh().catch((error) => {
-          text("live-state", "api error");
-          text("health-meta", error.message);
-        });
+        refresh().catch(showError);
       }, 5000);
     </script>
   </body>

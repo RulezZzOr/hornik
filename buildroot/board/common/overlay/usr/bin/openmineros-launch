@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+RUNTIME_ENV=${RUNTIME_ENV:-/etc/openmineros/runtime.env}
+CONTROL_PLANE_BIN=${CONTROL_PLANE_BIN:-/usr/bin/openmineros-control-plane}
+
+if [ -f "$RUNTIME_ENV" ]; then
+    # shellcheck disable=SC1090
+    . "$RUNTIME_ENV"
+fi
+
+: "${BOARD:=s19-xil}"
+: "${MODEL:=s19j-pro}"
+: "${OPENMINEROS_BACKEND:=hardware-probe}"
+
+if [ ! -x "$CONTROL_PLANE_BIN" ]; then
+    echo "openmineros: missing control plane binary at $CONTROL_PLANE_BIN" >&2
+    exit 127
+fi
+
+exec "$CONTROL_PLANE_BIN" \
+    --board "$BOARD" \
+    --model "$MODEL" \
+    --backend "$OPENMINEROS_BACKEND"

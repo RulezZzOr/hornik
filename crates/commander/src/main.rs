@@ -1,10 +1,11 @@
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 use openmineros_common::{
-    ArtifactBudget, BoardFamily, ContributionStatus, Model, ProfilesResponse, RuntimeConfig,
-    SupportLevel, check_manifest_budget_file, summarize_pools, supported_targets, target_catalog,
-    verify_manifest_file,
+    ArtifactBudget, BoardFamily, ContributionStatus, Model, ProfilesResponse, ReleaseManifest,
+    RuntimeConfig, SupportLevel, check_manifest_budget_file, load_release_manifest_file,
+    summarize_pools, supported_targets, target_catalog, verify_manifest_file,
 };
+use serde::Serialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -46,10 +47,41 @@ enum Command {
         #[arg(long, default_value_t = ArtifactBudget::default().max_total_artifact_bytes)]
         max_total_artifact_bytes: u64,
     },
+    InstallPlan {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long)]
+        artifact_dir: Option<PathBuf>,
+        #[arg(long)]
+        allow_flashable_unsigned: bool,
+    },
     ValidateConfig {
         #[arg(long)]
         config: PathBuf,
     },
+}
+
+#[derive(Debug, Serialize)]
+struct InstallArtifactSummary {
+    path: String,
+    kind: String,
+    sha256: String,
+    bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct InstallPlanReport {
+    manifest: String,
+    artifact_dir: String,
+    board: String,
+    model: String,
+    flashable: bool,
+    signature_required: bool,
+    signature_present: bool,
+    install_ready: bool,
+    install_image: Option<InstallArtifactSummary>,
+    verified_artifacts: Vec<String>,
+    notes: Vec<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -123,6 +155,65 @@ fn main() -> anyhow::Result<()> {
                     max_total_artifact_bytes,
                 },
             )?;
+
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::InstallPlan {
+            manifest,
+            artifact_dir,
+            allow_flashable_unsigned,
+        } => {
+            let artifact_dir = artifact_dir.unwrap_or_else(|| {
+                manifest
+                    .parent()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("."))
+            });
+
+            let verification =
+                verify_manifest_file(&manifest, &artifact_dir, allow_flashable_unsigned)?;
+            let release: ReleaseManifest = load_release_manifest_file(&manifest)?;
+            let _budget_report =
+                check_manifest_budget_file(&manifest, &artifact_dir, ArtifactBudget::default())?;
+            let install_image = release
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.kind == "install-image")
+                .map(|artifact| InstallArtifactSummary {
+                    path: artifact.path.clone(),
+                    kind: artifact.kind.clone(),
+                    sha256: artifact.sha256.clone(),
+                    bytes: artifact.bytes,
+                });
+
+            let install_ready = release.flashable && install_image.is_some();
+
+            let notes = if release.flashable {
+                vec![
+                    "flashable release verified for installation planning".to_string(),
+                    "use INSTALL.md for the board-specific recovery path".to_string(),
+                ]
+            } else {
+                vec![
+                    "this build is not flashable yet".to_string(),
+                    "the current artifact packages the device-side runtime layout and safe boot hooks"
+                        .to_string(),
+                ]
+            };
+
+            let report = InstallPlanReport {
+                manifest: manifest.display().to_string(),
+                artifact_dir: artifact_dir.display().to_string(),
+                board: release.board,
+                model: release.model,
+                flashable: release.flashable,
+                signature_required: verification.signature_required,
+                signature_present: verification.signature_present,
+                install_ready,
+                install_image,
+                verified_artifacts: verification.verified_artifacts,
+                notes,
+            };
 
             println!("{}", serde_json::to_string_pretty(&report)?);
         }

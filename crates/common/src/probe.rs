@@ -34,6 +34,7 @@ pub struct HardwareProbeReport {
     pub model: Model,
     pub board_family: BoardFamily,
     pub safe_read_only: bool,
+    pub probe_root: Option<String>,
     pub summary: HardwareProbeSummary,
     pub checks: Vec<ProbeCheck>,
     pub notes: Vec<String>,
@@ -46,6 +47,7 @@ impl HardwareProbeReport {
         backend: RuntimeBackendMode,
         model: Model,
         board_family: BoardFamily,
+        probe_root: Option<String>,
         checks: Vec<ProbeCheck>,
         notes: Vec<String>,
     ) -> Self {
@@ -71,6 +73,7 @@ impl HardwareProbeReport {
             model,
             board_family,
             safe_read_only: true,
+            probe_root,
             summary,
             checks,
             notes,

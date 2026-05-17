@@ -162,6 +162,7 @@ pub enum SharePrecheckVerdict {
     AcceptedForSubmit,
     RejectedInvalidField,
     RejectedSocketClosed,
+    RejectedBoardPaused,
     RejectedNotSubscribed,
     RejectedNotAuthorized,
     RejectedNoActiveJob,

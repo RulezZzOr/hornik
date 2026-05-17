@@ -13,11 +13,12 @@ use openmineros_common::StratumSubmitPolicy;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
     BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
-    HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport, HardwareSafetyGate,
-    JobPipelinePolicy, MinerStatus, Model, PoolStrategyResponse, PoolSummary, ProfilesResponse,
-    RuntimeBackendMode, RuntimeConfig, SharePrecheckResult, StratumEngineStatus,
-    StratumShareCandidate, SupportBundle, SystemInfo, TargetCatalog, TuningExecutionStatus,
-    TuningPlanResponse, TuningProtocolTranscript, UpdateStatus, target_catalog,
+    FirmwareDeploymentReport, HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport,
+    HardwareSafetyGate, JobPipelinePolicy, MinerStatus, Model, PoolStrategyResponse, PoolSummary,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, RuntimeControlReport, SharePrecheckResult,
+    StratumEngineStatus, StratumShareCandidate, SupportBundle, SystemInfo, TargetCatalog,
+    TuningExecutionStatus, TuningPlanResponse, TuningProtocolTranscript, UpdateStatus,
+    target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -100,7 +101,13 @@ fn build_app(supervisor: Arc<Supervisor>) -> Router {
         .route("/api/v1/stratum/status", get(stratum_status))
         .route("/api/v1/stratum/submit-policy", get(stratum_submit_policy))
         .route("/api/v1/stratum/submit-share", post(stratum_submit_share))
+        .route("/api/v1/runtime/control", get(runtime_control))
+        .route("/api/v1/board/pause", post(board_pause))
+        .route("/api/v1/board/resume", post(board_resume))
+        .route("/api/v1/tuning/lock", post(tuning_lock))
+        .route("/api/v1/tuning/unlock", post(tuning_unlock))
         .route("/api/v1/profiles", get(profiles))
+        .route("/api/v1/firmware/deployment", get(firmware_deployment))
         .route("/api/v1/tuning/plan", get(tuning_plan))
         .route("/api/v1/tuning/execution", get(tuning_execution))
         .route("/api/v1/tuning/transcript", get(tuning_transcript))
@@ -190,8 +197,34 @@ async fn stratum_submit_share(
     Json(supervisor.submit_share(candidate))
 }
 
+async fn runtime_control(State(supervisor): State<Arc<Supervisor>>) -> Json<RuntimeControlReport> {
+    Json(supervisor.runtime_control_report())
+}
+
+async fn board_pause(State(supervisor): State<Arc<Supervisor>>) -> Json<RuntimeControlReport> {
+    Json(supervisor.pause_board(None))
+}
+
+async fn board_resume(State(supervisor): State<Arc<Supervisor>>) -> Json<RuntimeControlReport> {
+    Json(supervisor.resume_board())
+}
+
+async fn tuning_lock(State(supervisor): State<Arc<Supervisor>>) -> Json<RuntimeControlReport> {
+    Json(supervisor.lock_tuning_profile())
+}
+
+async fn tuning_unlock(State(supervisor): State<Arc<Supervisor>>) -> Json<RuntimeControlReport> {
+    Json(supervisor.unlock_tuning_profile())
+}
+
 async fn profiles(State(supervisor): State<Arc<Supervisor>>) -> Json<ProfilesResponse> {
     Json(supervisor.profiles())
+}
+
+async fn firmware_deployment(
+    State(supervisor): State<Arc<Supervisor>>,
+) -> Json<FirmwareDeploymentReport> {
+    Json(supervisor.firmware_deployment_report())
 }
 
 async fn tuning_plan(State(supervisor): State<Arc<Supervisor>>) -> Json<TuningPlanResponse> {
@@ -273,7 +306,7 @@ async fn metrics(State(supervisor): State<Arc<Supervisor>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openmineros_common::{RuntimeConfig, SharePrecheckVerdict};
+    use openmineros_common::{RuntimeConfig, RuntimeControlReport, SharePrecheckVerdict};
     use tower::util::ServiceExt;
 
     #[tokio::test]
@@ -418,5 +451,190 @@ mod tests {
                 .unwrap()
                 .contains("autotune is disabled")
         );
+    }
+
+    #[tokio::test]
+    async fn board_pause_and_resume_update_runtime_control() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/board/pause")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let report: RuntimeControlReport = serde_json::from_slice(&body).unwrap();
+        assert!(report.board_paused);
+        assert_eq!(
+            report.tuning_lock_state,
+            openmineros_common::TuningLockState::Searching
+        );
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/runtime/control")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let report: RuntimeControlReport = serde_json::from_slice(&body).unwrap();
+        assert!(report.board_paused);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/board/resume")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let report: RuntimeControlReport = serde_json::from_slice(&body).unwrap();
+        assert!(!report.board_paused);
+    }
+
+    #[tokio::test]
+    async fn tuning_lock_and_unlock_update_runtime_control() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tuning/lock")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let report: RuntimeControlReport = serde_json::from_slice(&body).unwrap();
+        assert!(report.tuning_locked);
+        assert!(report.locked_profile.is_some());
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/tuning/unlock")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let report: RuntimeControlReport = serde_json::from_slice(&body).unwrap();
+        assert!(!report.tuning_locked);
+        assert!(report.locked_profile.is_none());
+    }
+
+    #[tokio::test]
+    async fn paused_board_rejects_share_submit() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        supervisor.pause_board(None);
+        let app = build_app(supervisor);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/stratum/submit-share")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"worker":"acct.worker","job_id":"job-1","extranonce2":"00000002","ntime":"5f5e1000","nonce":"00000001"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let result: SharePrecheckResult = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result.verdict, SharePrecheckVerdict::RejectedBoardPaused);
+        assert!(!result.submit_allowed);
+    }
+
+    #[tokio::test]
+    async fn get_firmware_deployment_returns_missing_gaps() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::Simulated,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/firmware/deployment")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let report: FirmwareDeploymentReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.schema_version, 1);
+        assert!(!report.deployable);
+        assert!(report.gaps.iter().any(|gap| gap.key == "asic_transport"));
+        assert!(report.gaps.iter().any(|gap| gap.key == "bootable_image"));
+        assert!(report.gaps.iter().any(|gap| gap.key == "physical_probe"));
     }
 }

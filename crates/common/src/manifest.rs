@@ -164,7 +164,7 @@ pub fn verify_manifest_file(
 ) -> Result<VerificationReport, ManifestError> {
     let manifest_path = manifest_path.as_ref();
     let artifact_dir = artifact_dir.as_ref();
-    let manifest = load_manifest(manifest_path)?;
+    let manifest = load_release_manifest_file(manifest_path)?;
 
     manifest.validate_policy(allow_flashable_unsigned)?;
 
@@ -190,7 +190,7 @@ pub fn check_manifest_budget_file(
 ) -> Result<ArtifactBudgetReport, ManifestError> {
     let manifest_path = manifest_path.as_ref();
     let artifact_dir = artifact_dir.as_ref();
-    let manifest = load_manifest(manifest_path)?;
+    let manifest = load_release_manifest_file(manifest_path)?;
     manifest.validate_policy(false)?;
 
     let mut total_artifact_bytes = 0_u64;
@@ -255,7 +255,10 @@ pub fn check_manifest_budget_file(
     })
 }
 
-fn load_manifest(manifest_path: &Path) -> Result<ReleaseManifest, ManifestError> {
+pub fn load_release_manifest_file(
+    manifest_path: impl AsRef<Path>,
+) -> Result<ReleaseManifest, ManifestError> {
+    let manifest_path = manifest_path.as_ref();
     let manifest_file = File::open(manifest_path).map_err(ManifestError::ReadManifest)?;
     serde_json::from_reader(manifest_file).map_err(ManifestError::ParseManifest)
 }

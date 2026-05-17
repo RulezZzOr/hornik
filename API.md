@@ -10,8 +10,10 @@ All public REST endpoints are versioned under `/api/v1`.
 - `GET /api/v1/hardware/safety`
 - `GET /api/v1/hardware/readiness`
 - `GET /api/v1/hardware/probe`
+- `GET /api/v1/firmware/deployment`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
+- `GET /api/v1/runtime/control`
 - `GET /api/v1/events`
 - `GET /api/v1/ws`
 - `GET /api/v1/support/bundle`
@@ -29,6 +31,7 @@ Overview response:
   "identity": {},
   "safety": {},
   "readiness": {},
+  "control": {},
   "health": {},
   "miner": {},
   "job_pipeline": {},
@@ -169,6 +172,31 @@ combines configured board/model, support level, recovery path, board
 capabilities, and the hardware safety gate. It does not grant additional
 permissions beyond `/api/v1/hardware/safety`.
 
+Runtime control report:
+
+```json
+{
+  "schema_version": 1,
+  "board_family": "xilinx",
+  "model": "s19j-pro",
+  "board_state": "running",
+  "board_paused": false,
+  "pause_reason": null,
+  "tuning_lock_state": "searching",
+  "tuning_locked": false,
+  "locked_profile": null,
+  "notes": [
+    "board pause suspends ASIC dispatch without restarting the miner process",
+    "tuning lock freezes the discovered profile until the operator unlocks it"
+  ]
+}
+```
+
+`POST /api/v1/board/pause` switches the board into paused state without
+restarting the miner process. `POST /api/v1/board/resume` restores normal
+dispatch. `POST /api/v1/tuning/lock` freezes the current tuning profile, and
+`POST /api/v1/tuning/unlock` allows changes again.
+
 Hardware probe report:
 
 ```json
@@ -176,6 +204,7 @@ Hardware probe report:
   "schema_version": 1,
   "backend": "hardware-probe",
   "safe_read_only": true,
+  "probe_root": "/mnt/s19-root",
   "summary": {
     "total": 4,
     "detected": 0,
@@ -198,6 +227,36 @@ Hardware probe report:
 
 The probe endpoint is read-only. It checks expected OS paths only and does not
 issue GPIO, UART, I2C, SPI, fan, voltage, clock, pool, or ASIC commands.
+Set `OPENMINEROS_PROBE_ROOT=/path/to/target-root` when you want to scan a
+mounted S19 root filesystem instead of the live host root.
+`probe_root` shows which filesystem was scanned.
+
+Firmware deployment report:
+
+```json
+{
+  "schema_version": 1,
+  "backend": "hardware-probe",
+  "board_family": "xilinx",
+  "model": "s19j-pro",
+  "probe_root": "/mnt/s19-root",
+  "deployable": false,
+  "gaps": [
+    {
+      "key": "asic_transport",
+      "title": "Real ASIC transport",
+      "state": "missing",
+      "detail": "The backend still writes framed bytes to a UART path; there is no device-side ASIC driver or chip scheduler yet."
+    }
+  ],
+  "notes": [
+    "build 0.1.0 is still missing the real device-side firmware runtime"
+  ]
+}
+```
+
+The report is the current checklist for what still blocks a bootable S19
+firmware image.
 
 Events response:
 
@@ -315,7 +374,13 @@ bundles, or reboot the device.
 - `GET /api/v1/stratum/status`
 - `GET /api/v1/stratum/submit-policy`
 - `POST /api/v1/stratum/submit-share`
+- `GET /api/v1/runtime/control`
+- `POST /api/v1/board/pause`
+- `POST /api/v1/board/resume`
+- `POST /api/v1/tuning/lock`
+- `POST /api/v1/tuning/unlock`
 - `GET /api/v1/profiles`
+- `GET /api/v1/firmware/deployment`
 - `GET /api/v1/tuning/plan`
 - `GET /api/v1/tuning/execution`
 - `GET /api/v1/tuning/transcript`
@@ -617,6 +682,8 @@ Tuning execution status:
 The execution status exposes the current step queue the runtime would use if
 the write gate were enabled. In build `0.1.0` it remains read-only and tracks
 the same baseline, downclock, upclock, then voltage-trim order.
+When runtime control is locked, the board keeps the chosen tuning profile and
+does not keep changing it between cycles.
 
 ## Contribution
 

@@ -110,6 +110,8 @@ pub struct MinerStatus {
     pub accepted_shares: u64,
     pub rejected_shares: u64,
     pub mode: MinerMode,
+    pub paused: bool,
+    pub pause_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

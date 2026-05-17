@@ -3,7 +3,7 @@ MODEL ?= s19j-pro
 VERSION ?= 0.1.0
 DIST_DIR ?= dist
 
-.PHONY: bootstrap fmt clippy test release size-budget artifact-budget run-control-plane image verify-repro clean
+.PHONY: bootstrap fmt clippy test release size-budget artifact-budget run-control-plane image install-preflight verify-repro clean
 
 bootstrap:
 	cargo fetch
@@ -31,6 +31,9 @@ run-control-plane:
 
 image:
 	./scripts/build-image.sh "$(BOARD)" "$(MODEL)" "$(VERSION)" "$(DIST_DIR)"
+
+install-preflight:
+	./scripts/install-preflight.sh "$(BOARD)" "$(MODEL)" "$(VERSION)" "$(DIST_DIR)"
 
 verify-repro:
 	./scripts/verify-repro.sh "$(BOARD)" "$(MODEL)" "$(VERSION)"

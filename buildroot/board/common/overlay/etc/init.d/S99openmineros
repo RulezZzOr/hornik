@@ -1,0 +1,41 @@
+#!/bin/sh
+
+RUNTIME_ENV=${RUNTIME_ENV:-/etc/openmineros/runtime.env}
+DAEMON=${DAEMON:-/usr/bin/openmineros-launch}
+PIDFILE=${PIDFILE:-/var/run/openmineros.pid}
+LOGFILE=${LOGFILE:-/var/log/openmineros/control-plane.log}
+
+start() {
+    if [ ! -x "$DAEMON" ]; then
+        echo "openmineros: missing launcher $DAEMON"
+        return 1
+    fi
+
+    mkdir -p /var/log/openmineros /var/run
+    echo "openmineros: starting from $RUNTIME_ENV"
+    start-stop-daemon -S -b -m -p "$PIDFILE" -x "$DAEMON" -- >>"$LOGFILE" 2>&1
+}
+
+stop() {
+    if [ -f "$PIDFILE" ]; then
+        start-stop-daemon -K -p "$PIDFILE" || true
+        rm -f "$PIDFILE"
+    fi
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        stop
+        start
+        ;;
+    *)
+        echo "usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac

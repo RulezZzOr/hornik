@@ -23,6 +23,7 @@ Build `0.1.0` is a safe development baseline:
 - Read-only autotune plan: baseline, downclock efficiency, upclock stability, then voltage trim.
 - Read-only tuning transcript API for chip-by-chip command previews with structured targets.
 - Read-only tuning execution status API that shows the current step, queue, and write gate.
+- Runtime control API for board pause/resume and tuning profile lock without restarting the miner process.
 - Deterministic in-memory event snapshot API.
 - WebSocket event snapshot and heartbeat API.
 - Redacted support bundle API.
@@ -49,13 +50,18 @@ Open `http://127.0.0.1:8080` for the local status UI.
 make image BOARD=s19-xil MODEL=s19j-pro
 make image BOARD=s19-bb MODEL=s19j-pro
 make image BOARD=s19-aml MODEL=s19j-pro
+make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```
 
 The generated files are metadata-only development artefacts in `dist/`.
-They are intentionally not flashable firmware images.
+They are intentionally not flashable firmware images yet, but the bundle now
+contains the device-side runtime layout and safe boot hooks.
+
+See `INSTALL.md` for the current install-prep flow and `UPGRADE.md` for the
+slot and rollback policy.
 
 ## API
 
@@ -66,12 +72,18 @@ They are intentionally not flashable firmware images.
 - `GET /api/v1/hardware/safety`
 - `GET /api/v1/hardware/readiness`
 - `GET /api/v1/hardware/probe`
+- `GET /api/v1/firmware/deployment`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
 - `GET /api/v1/miner/job-pipeline`
 - `GET /api/v1/chains`
 - `GET /api/v1/stratum/status`
 - `GET /api/v1/stratum/submit-policy`
+- `GET /api/v1/runtime/control`
+- `POST /api/v1/board/pause`
+- `POST /api/v1/board/resume`
+- `POST /api/v1/tuning/lock`
+- `POST /api/v1/tuning/unlock`
 - `GET /api/v1/tuning/transcript`
 - `GET /api/v1/contribution/status`
 - `GET /api/v1/pools/strategy`
@@ -89,6 +101,12 @@ read-only and reports zero hashrate until ASIC bus probing is implemented.
 dispatch over the board UART path.
 `GET /api/v1/hardware/probe` checks expected OS paths only; it does not issue
 GPIO, UART, fan, voltage, clock, pool, or ASIC commands.
+Set `OPENMINEROS_PROBE_ROOT=/path/to/target-root` to scan a mounted S19 root
+filesystem instead of the live host root.
+The probe report includes the effective `probe_root` so you can confirm which
+filesystem was scanned.
+`GET /api/v1/firmware/deployment` lists the remaining blockers before the
+project can become a bootable S19 firmware image.
 `GET /api/v1/hardware/identity` compares the configured board/model with
 read-only evidence and never auto-switches the target in build `0.1.0`.
 `GET /api/v1/hardware/safety` keeps real hardware mining, flashing, tuning

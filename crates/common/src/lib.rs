@@ -1,7 +1,9 @@
 pub mod board;
 pub mod config;
 pub mod contribution;
+pub mod control;
 pub mod event;
+pub mod firmware;
 pub mod identity;
 pub mod job;
 pub mod manifest;
@@ -26,7 +28,9 @@ pub use contribution::{
     ContributionStatus, ContributionWindow, DEFAULT_CONTRIBUTION_BENEFICIARY,
     MAX_CONTRIBUTION_RATE_PERCENT, MUTABLE_CONTRIBUTION_FIELDS, default_contribution_endpoints,
 };
+pub use control::{BoardControlState, LockedTuningProfile, RuntimeControlReport, TuningLockState};
 pub use event::{EventBuilder, EventEnvelope, EventRecord, EventSeverity, EventsResponse};
+pub use firmware::{FirmwareDeploymentReport, FirmwareGap, FirmwareGapState};
 pub use identity::{
     HardwareIdentityConfidence, HardwareIdentityEvidence, HardwareIdentityObservation,
     HardwareIdentityReport, HardwareIdentityState, infer_hardware_identity,
@@ -35,7 +39,7 @@ pub use job::{JobPipelinePolicy, JobPipelineState};
 pub use manifest::{
     ArtifactBudget, ArtifactBudgetEntry, ArtifactBudgetReport, ArtifactManifest, ManifestError,
     ReleaseManifest, ReleaseSignature, VerificationReport, check_manifest_budget_file,
-    verify_manifest_file,
+    load_release_manifest_file, verify_manifest_file,
 };
 pub use overview::DashboardOverview;
 pub use pool::{

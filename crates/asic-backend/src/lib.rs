@@ -7,6 +7,7 @@ use openmineros_common::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    env,
     fs::{File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -308,6 +309,7 @@ impl SimulatedBackend {
             self.mode(),
             self.model,
             self.profile.family,
+            None,
             probe_plan(self.profile.family, ProbeMode::Skipped),
             vec![
                 "simulated backend does not inspect host hardware".to_string(),
@@ -327,6 +329,7 @@ pub struct HardwareProbeBackend {
     model: Model,
     profile: BoardProfile,
     support: SupportLevel,
+    probe_root: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -410,6 +413,8 @@ impl HardwareMiningBackend {
             accepted_shares: 0,
             rejected_shares: 0,
             mode: MinerMode::Balanced,
+            paused: false,
+            pause_reason: None,
         }
     }
 
@@ -438,7 +443,11 @@ impl HardwareMiningBackend {
             self.mode(),
             self.model,
             self.profile.family,
-            probe_plan(self.profile.family, ProbeMode::ReadOnlyFilesystem),
+            None,
+            probe_plan(
+                self.profile.family,
+                ProbeMode::ReadOnlyFilesystem(PathBuf::from("/")),
+            ),
             vec![
                 "live backend keeps probe checks read-only for identification".to_string(),
                 format!(
@@ -454,7 +463,10 @@ impl HardwareMiningBackend {
             self.mode(),
             self.profile.family,
             self.model,
-            identity_observations(self.profile.family, ProbeMode::ReadOnlyFilesystem),
+            identity_observations(
+                self.profile.family,
+                ProbeMode::ReadOnlyFilesystem(PathBuf::from("/")),
+            ),
         )
     }
 
@@ -705,6 +717,17 @@ fn checksum_hex(bytes: &[u8]) -> String {
 
 impl HardwareProbeBackend {
     pub fn new(model: Model, board: BoardFamily) -> Result<Self, BackendError> {
+        let probe_root = env::var_os("OPENMINEROS_PROBE_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        Self::with_probe_root(model, board, probe_root)
+    }
+
+    pub fn with_probe_root(
+        model: Model,
+        board: BoardFamily,
+        probe_root: PathBuf,
+    ) -> Result<Self, BackendError> {
         let support = target_support(model, board)?;
         let profile = board_profile(board);
 
@@ -712,6 +735,7 @@ impl HardwareProbeBackend {
             model,
             profile,
             support,
+            probe_root,
         })
     }
 
@@ -736,9 +760,11 @@ impl HardwareProbeBackend {
             state: HealthStatus::Recovering,
             severity: Severity::Warn,
             issues: vec![
-                "hardware-probe backend is a read-only bring-up scaffold in build 0.1.0"
-                    .to_string(),
-                "ASIC bus probing is not implemented yet; no mining is started".to_string(),
+                format!(
+                    "hardware-probe backend scans read-only evidence under {}",
+                    self.probe_root.display()
+                ),
+                "ASIC bus probing is read-only and no mining writes are issued".to_string(),
             ],
         }
     }
@@ -751,6 +777,8 @@ impl HardwareProbeBackend {
             accepted_shares: 0,
             rejected_shares: 0,
             mode: MinerMode::SafeMode,
+            paused: false,
+            pause_reason: None,
         }
     }
 
@@ -773,9 +801,16 @@ impl HardwareProbeBackend {
             self.mode(),
             self.model,
             self.profile.family,
-            probe_plan(self.profile.family, ProbeMode::ReadOnlyFilesystem),
+            Some(self.probe_root.display().to_string()),
+            probe_plan(
+                self.profile.family,
+                ProbeMode::ReadOnlyFilesystem(self.probe_root.clone()),
+            ),
             vec![
-                "checks only test whether expected OS paths exist".to_string(),
+                format!(
+                    "checks read-only OS paths under {}",
+                    self.probe_root.display()
+                ),
                 "no GPIO, UART, I2C, SPI, fan, voltage, clock, or ASIC commands are issued"
                     .to_string(),
             ],
@@ -787,15 +822,18 @@ impl HardwareProbeBackend {
             self.mode(),
             self.profile.family,
             self.model,
-            identity_observations(self.profile.family, ProbeMode::ReadOnlyFilesystem),
+            identity_observations(
+                self.profile.family,
+                ProbeMode::ReadOnlyFilesystem(self.probe_root.clone()),
+            ),
         )
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ProbeMode {
     Skipped,
-    ReadOnlyFilesystem,
+    ReadOnlyFilesystem(PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -809,7 +847,7 @@ struct ProbeExpectation {
 fn probe_plan(board: BoardFamily, mode: ProbeMode) -> Vec<ProbeCheck> {
     probe_expectations(board)
         .into_iter()
-        .map(|expectation| probe_check(expectation, mode))
+        .map(|expectation| probe_check(expectation, mode.clone()))
         .collect()
 }
 
@@ -817,10 +855,10 @@ fn identity_observations(board: BoardFamily, mode: ProbeMode) -> Vec<HardwareIde
     let mut observations = Vec::new();
 
     for expectation in probe_expectations(board) {
-        if mode == ProbeMode::ReadOnlyFilesystem {
-            let path = Path::new(expectation.path);
+        if let ProbeMode::ReadOnlyFilesystem(ref root) = mode {
+            let path = probe_root_path(root, expectation.path);
             if path.is_file() {
-                if let Ok(value) = std::fs::read_to_string(path) {
+                if let Ok(value) = std::fs::read_to_string(&path) {
                     observations.push(HardwareIdentityObservation {
                         source: expectation.interface.to_string(),
                         key: expectation.name.to_string(),
@@ -854,12 +892,21 @@ fn probe_check(expectation: ProbeExpectation, mode: ProbeMode) -> ProbeCheck {
             ProbeStatus::Skipped,
             "simulated backend skipped host filesystem probing".to_string(),
         ),
-        ProbeMode::ReadOnlyFilesystem => {
-            if Path::new(expectation.path).exists() {
-                (
-                    ProbeStatus::Detected,
-                    "expected path exists on this host".to_string(),
-                )
+        ProbeMode::ReadOnlyFilesystem(root) => {
+            let path = probe_root_path(&root, expectation.path);
+            if path.exists() {
+                let detail = if path.is_file() {
+                    match std::fs::read_to_string(&path) {
+                        Ok(value) => format!(
+                            "detected read-only evidence: {}",
+                            sanitize_observation_value(&value)
+                        ),
+                        Err(_) => "expected path exists on this host".to_string(),
+                    }
+                } else {
+                    "expected path exists on this host".to_string()
+                };
+                (ProbeStatus::Detected, detail)
             } else {
                 (
                     ProbeStatus::Missing,
@@ -879,6 +926,11 @@ fn probe_check(expectation: ProbeExpectation, mode: ProbeMode) -> ProbeCheck {
     }
 }
 
+fn probe_root_path(root: &Path, probe_path: &str) -> PathBuf {
+    let relative = probe_path.strip_prefix('/').unwrap_or(probe_path);
+    root.join(relative)
+}
+
 fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
     match board {
         BoardFamily::Xilinx => vec![
@@ -887,6 +939,18 @@ fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
                 interface: "device-tree",
                 path: "/proc/device-tree/model",
                 required: true,
+            },
+            ProbeExpectation {
+                name: "device tree compatible",
+                interface: "device-tree",
+                path: "/proc/device-tree/compatible",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "device tree serial number",
+                interface: "device-tree",
+                path: "/proc/device-tree/serial-number",
+                required: false,
             },
             ProbeExpectation {
                 name: "control UART",
@@ -906,6 +970,12 @@ fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
                 path: "/sys/class/hwmon",
                 required: false,
             },
+            ProbeExpectation {
+                name: "thermal zones",
+                interface: "thermal",
+                path: "/sys/class/thermal",
+                required: false,
+            },
         ],
         BoardFamily::BeagleBone => vec![
             ProbeExpectation {
@@ -913,6 +983,18 @@ fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
                 interface: "device-tree",
                 path: "/proc/device-tree/model",
                 required: true,
+            },
+            ProbeExpectation {
+                name: "device tree compatible",
+                interface: "device-tree",
+                path: "/proc/device-tree/compatible",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "device tree serial number",
+                interface: "device-tree",
+                path: "/proc/device-tree/serial-number",
+                required: false,
             },
             ProbeExpectation {
                 name: "control UART",
@@ -932,6 +1014,12 @@ fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
                 path: "/sys/bus/iio/devices",
                 required: false,
             },
+            ProbeExpectation {
+                name: "thermal zones",
+                interface: "thermal",
+                path: "/sys/class/thermal",
+                required: false,
+            },
         ],
         BoardFamily::Amlogic => vec![
             ProbeExpectation {
@@ -939,6 +1027,18 @@ fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
                 interface: "device-tree",
                 path: "/proc/device-tree/model",
                 required: true,
+            },
+            ProbeExpectation {
+                name: "device tree compatible",
+                interface: "device-tree",
+                path: "/proc/device-tree/compatible",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "device tree serial number",
+                interface: "device-tree",
+                path: "/proc/device-tree/serial-number",
+                required: false,
             },
             ProbeExpectation {
                 name: "control UART",
@@ -956,6 +1056,12 @@ fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
                 name: "hardware monitor sensors",
                 interface: "hwmon",
                 path: "/sys/class/hwmon",
+                required: false,
+            },
+            ProbeExpectation {
+                name: "thermal zones",
+                interface: "thermal",
+                path: "/sys/class/thermal",
                 required: false,
             },
         ],
@@ -1030,12 +1136,15 @@ fn simulated_miner_status(model: Model) -> MinerStatus {
         accepted_shares: 0,
         rejected_shares: 0,
         mode: MinerMode::Balanced,
+        paused: false,
+        pause_reason: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openmineros_common::HardwareIdentityState;
     use std::{
         fs,
         time::{SystemTime, UNIX_EPOCH},
@@ -1047,6 +1156,14 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("openmineros-asic-uart-{}.log", unique))
+    }
+
+    fn temp_probe_root() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("openmineros-probe-root-{}", unique))
     }
 
     #[test]
@@ -1297,6 +1414,56 @@ mod tests {
     }
 
     #[test]
+    fn hardware_probe_backend_reads_probe_root_for_identity_and_checks() {
+        let root = temp_probe_root();
+        fs::create_dir_all(root.join("proc/device-tree")).unwrap();
+        fs::create_dir_all(root.join("dev")).unwrap();
+        fs::create_dir_all(root.join("sys/class/gpio")).unwrap();
+        fs::create_dir_all(root.join("sys/class/hwmon")).unwrap();
+        fs::create_dir_all(root.join("sys/class/thermal")).unwrap();
+        fs::write(
+            root.join("proc/device-tree/model"),
+            b"Antminer S19j Pro Xilinx Zynq\0",
+        )
+        .unwrap();
+        fs::write(
+            root.join("proc/device-tree/compatible"),
+            b"antminer,s19j-pro-xilinx\0",
+        )
+        .unwrap();
+        fs::write(
+            root.join("proc/device-tree/serial-number"),
+            b"S19JPRO-0001\0",
+        )
+        .unwrap();
+        fs::write(root.join("dev/ttyPS0"), b"").unwrap();
+
+        let backend = HardwareProbeBackend::with_probe_root(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            root.clone(),
+        )
+        .unwrap();
+        let report = backend.probe_report();
+        let identity = backend.identity_report();
+
+        assert_eq!(report.probe_root.as_deref(), Some(root.to_str().unwrap()));
+        assert_eq!(report.summary.missing_required, 0);
+        assert_eq!(report.summary.detected, report.summary.total);
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.contains(root.to_str().unwrap()))
+        );
+        assert_eq!(identity.state, HardwareIdentityState::Inferred);
+        assert_eq!(identity.detected_board, Some(BoardFamily::Xilinx));
+        assert_eq!(identity.detected_model, Some(Model::S19jPro));
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn simulated_probe_report_is_skipped() {
         let backend = SimulatedBackend::new(Model::S19jPro, BoardFamily::Xilinx).unwrap();
         let report = backend.probe_report();
@@ -1334,7 +1501,7 @@ mod tests {
         assert_eq!(report.backend, RuntimeBackendMode::HardwareProbe);
         assert_eq!(report.board_family, BoardFamily::Xilinx);
         assert!(report.safe_read_only);
-        assert_eq!(report.summary.total, 4);
+        assert_eq!(report.summary.total, 7);
         assert!(
             report
                 .checks

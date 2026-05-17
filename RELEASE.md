@@ -3,6 +3,10 @@
 Build `0.1.0` establishes the release safety contract before real SD images
 exist.
 
+The current release flow prepares a reproducible install bundle and install
+plan with the device-side runtime layout, but it does not yet ship a
+flashable production image.
+
 ## Manifest Policy
 
 Each release bundle must include a manifest with:
@@ -36,6 +40,7 @@ Release candidates must pass:
 ```bash
 make size-budget
 make artifact-budget
+make install-preflight
 ```
 
 Default `0.1.0` budgets:
