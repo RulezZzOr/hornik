@@ -76,6 +76,23 @@ When the flashable image lands, installation will require:
 The development bundle already carries the runtime binary and boot hooks, so
 the remaining gap is the flashable image and update/rollback path.
 
+## Anti-Brick Gate
+
+The first boot bundle defaults to `hardware-probe` and forces safe mode through
+`/etc/openmineros/runtime.env`.
+
+Required first-boot checks:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/firmware/anti-brick | jq
+/usr/bin/openmineros-first-boot-report
+/usr/bin/openmineros-nand-update
+```
+
+The anti-brick API must show `safe_to_first_boot=true`, `nand_writes_allowed=false`,
+`asic_writes_allowed=false`, and `flashing_allowed=false`. The NAND command is
+a guard stub in this build and must exit without writing.
+
 ## Post-Install Check
 
 After a successful boot, confirm:
@@ -83,6 +100,7 @@ After a successful boot, confirm:
 ```bash
 curl -s http://127.0.0.1:8080/api/v1/hardware/readiness | jq
 curl -s http://127.0.0.1:8080/api/v1/firmware/deployment | jq
+curl -s http://127.0.0.1:8080/api/v1/firmware/anti-brick | jq
 ```
 
 The target is not considered ready until the safety gate, hardware identity,

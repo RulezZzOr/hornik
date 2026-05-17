@@ -4,20 +4,20 @@ use openmineros_asic_backend::{
 };
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardControlState, BoardFamily, ChainStatus, ContributionConfig, ContributionStatus,
-    EventBuilder, EventSeverity, EventsResponse, FirmwareDeploymentReport, FirmwareGap,
-    FirmwareGapState, HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport,
-    HardwareReadinessState, HardwareSafetyGate, HealthStatus, JobPipelinePolicy,
-    LockedTuningProfile, MinerStatus, Model, PoolConfig, PoolConnectionPolicy, PoolRuntimeState,
-    PoolRuntimeSummary, PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode,
-    RuntimeConfig, RuntimeControlReport, Severity, SharePrecheckResult, SharePrecheckVerdict,
-    ShareValidationMode, StratumConnectionState, StratumEngineState, StratumEngineStatus,
-    StratumMessageKind, StratumShareCandidate, StratumSubmitPolicy, SupportBundle,
-    SupportBundlePrivacy, SystemInfo, TuningConfig, TuningExecutionState, TuningExecutionStatus,
-    TuningLockState, TuningPhase, TuningPlanResponse, TuningProtocolSequenceSpec,
-    TuningProtocolTranscript, UpdateStatus, classify_stratum_message, evaluate_hardware_readiness,
-    evaluate_hardware_safety, plan_pool_strategy, precheck_share_submit, summarize_pool_runtime,
-    summarize_pools,
+    AntiBrickCheck, AntiBrickReport, AntiBrickState, BoardControlState, BoardFamily, ChainStatus,
+    ContributionConfig, ContributionStatus, EventBuilder, EventSeverity, EventsResponse,
+    FirmwareDeploymentReport, FirmwareGap, FirmwareGapState, HardwareIdentityReport,
+    HardwareProbeReport, HardwareReadinessReport, HardwareReadinessState, HardwareSafetyGate,
+    HealthStatus, JobPipelinePolicy, LockedTuningProfile, MinerStatus, Model, PoolConfig,
+    PoolConnectionPolicy, PoolRuntimeState, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary,
+    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, RuntimeControlReport, Severity,
+    SharePrecheckResult, SharePrecheckVerdict, ShareValidationMode, StratumConnectionState,
+    StratumEngineState, StratumEngineStatus, StratumMessageKind, StratumShareCandidate,
+    StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
+    TuningExecutionState, TuningExecutionStatus, TuningLockState, TuningPhase, TuningPlanResponse,
+    TuningProtocolSequenceSpec, TuningProtocolTranscript, UpdateStatus, classify_stratum_message,
+    evaluate_hardware_readiness, evaluate_hardware_safety, plan_pool_strategy,
+    precheck_share_submit, summarize_pool_runtime, summarize_pools,
 };
 use serde_json::json;
 use std::{
@@ -664,6 +664,81 @@ impl Supervisor {
         }
     }
 
+    pub fn anti_brick_report(&self) -> AntiBrickReport {
+        let safety = self.hardware_safety_gate();
+        let deployment = self.firmware_deployment_report();
+        let backend = self.backend.mode();
+        let production_flashable = deployment.deployable;
+        let nand_writes_allowed = false;
+        let asic_writes_allowed = safety.asic_bus_writes_allowed;
+        let checks = vec![
+            AntiBrickCheck {
+                key: "read_only_backend".to_string(),
+                passed: backend == RuntimeBackendMode::HardwareProbe,
+                detail: "first S19 boot must use hardware-probe so ASIC dispatch stays disabled"
+                    .to_string(),
+            },
+            AntiBrickCheck {
+                key: "flash_writes_locked".to_string(),
+                passed: !safety.flashing_allowed,
+                detail: "runtime safety gate must reject flash/NAND writes".to_string(),
+            },
+            AntiBrickCheck {
+                key: "asic_writes_locked".to_string(),
+                passed: !asic_writes_allowed,
+                detail: "first boot must not dispatch jobs or tuning frames to the ASIC bus"
+                    .to_string(),
+            },
+            AntiBrickCheck {
+                key: "tuning_writes_locked".to_string(),
+                passed: !safety.tuning_writes_allowed,
+                detail: "frequency and voltage writes must remain locked before bring-up"
+                    .to_string(),
+            },
+            AntiBrickCheck {
+                key: "nand_writer_unarmed".to_string(),
+                passed: !nand_writes_allowed,
+                detail: "NAND artefact is a staging bundle; this build ships no armed NAND writer"
+                    .to_string(),
+            },
+            AntiBrickCheck {
+                key: "not_production_flashable".to_string(),
+                passed: !production_flashable,
+                detail: "development artefacts are not signed production-flashable releases"
+                    .to_string(),
+            },
+        ];
+        let safe_to_first_boot = checks.iter().all(|check| check.passed);
+        let state = if safe_to_first_boot {
+            AntiBrickState::SafeFirstBoot
+        } else if !safety.flashing_allowed && !nand_writes_allowed {
+            AntiBrickState::Guarded
+        } else {
+            AntiBrickState::Unsafe
+        };
+
+        AntiBrickReport {
+            schema_version: AntiBrickReport::SCHEMA_VERSION,
+            board_family: self.backend.profile().family,
+            model: self.backend.model(),
+            backend,
+            state,
+            safe_to_first_boot,
+            production_flashable,
+            nand_writes_allowed,
+            asic_writes_allowed,
+            tuning_writes_allowed: safety.tuning_writes_allowed,
+            flashing_allowed: safety.flashing_allowed,
+            checks,
+            notes: vec![
+                "safe_to_first_boot means read-only bring-up only; it does not mean mining is production-ready"
+                    .to_string(),
+                "do not attempt NAND writes until partition map, bootloader handoff, signature checks, and rollback are implemented"
+                    .to_string(),
+            ],
+        }
+    }
+
     pub fn events(&self) -> EventsResponse {
         let mut events = EventBuilder::new(self.uptime_seconds());
         let system_info = self.system_info();
@@ -976,6 +1051,7 @@ impl Supervisor {
             identity: self.hardware_identity_report(),
             safety: self.hardware_safety_gate(),
             readiness: self.hardware_readiness_report(),
+            anti_brick: self.anti_brick_report(),
             control: self.runtime_control_report(),
             health: self.health(),
             miner: self.miner_status(),
@@ -1004,6 +1080,7 @@ impl Supervisor {
             identity: self.hardware_identity_report(),
             safety: self.hardware_safety_gate(),
             readiness: self.hardware_readiness_report(),
+            anti_brick: self.anti_brick_report(),
             control: self.runtime_control_report(),
             health: self.health(),
             miner: self.miner_status(),
@@ -1028,6 +1105,7 @@ impl Supervisor {
         let safety = self.hardware_safety_gate();
         let readiness = self.hardware_readiness_report();
         let control = self.runtime_control_report();
+        let anti_brick = self.anti_brick_report();
         let health = self.health();
         let miner = self.miner_status();
         let job_pipeline = self.job_pipeline();
@@ -1093,6 +1171,16 @@ impl Supervisor {
             &mut output,
             "omo_runtime_tuning_locked",
             bool_value(control.tuning_locked),
+        );
+        metric(
+            &mut output,
+            "omo_firmware_safe_to_first_boot",
+            bool_value(anti_brick.safe_to_first_boot),
+        );
+        metric(
+            &mut output,
+            "omo_firmware_nand_writes_allowed",
+            bool_value(anti_brick.nand_writes_allowed),
         );
         labeled_metric(
             &mut output,

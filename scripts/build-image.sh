@@ -96,6 +96,9 @@ cat > "$rootfs_base/etc/openmineros/release.json" <<EOF_RELEASE
   "runtime_binary": "/usr/bin/openmineros-control-plane",
   "runtime_target": "$runtime_binary_label",
   "install_media": "$media",
+  "first_boot_safe": true,
+  "nand_writes_allowed": false,
+  "asic_writes_allowed": false,
   "flashable": false
 }
 EOF_RELEASE
@@ -107,6 +110,9 @@ model=$model
 runtime_target=$runtime_binary_label
 runtime_binary=/usr/bin/openmineros-control-plane
 install_media=$media
+first_boot_safe=true
+nand_writes_allowed=false
+asic_writes_allowed=false
 flashable=false
 This bundle contains the compiled device-side runtime, safe boot hooks, and
 the install-time launch script.
@@ -164,6 +170,9 @@ package_media() {
   "runtime_binary": "/usr/bin/openmineros-control-plane",
   "runtime_target": "$runtime_binary_label",
   "install_media": "$package_media_name",
+  "first_boot_safe": true,
+  "nand_writes_allowed": false,
+  "asic_writes_allowed": false,
   "flashable": false
 }
 EOF_RELEASE_MEDIA
@@ -178,9 +187,13 @@ EOF_RELEASE_MEDIA
   "artifact_kind": "$package_kind",
   "runtime_binary": "/usr/bin/openmineros-control-plane",
   "runtime_target": "$runtime_binary_label",
+  "first_boot_safe": true,
+  "nand_writes_allowed": false,
+  "asic_writes_allowed": false,
   "flashable": false,
   "notes": [
     "development media model for S19 bring-up",
+    "first boot is forced to hardware-probe read-only mode",
     "do not write NAND without a verified partition map and recovery path"
   ]
 }
@@ -193,6 +206,9 @@ model=$model
 target=$package_target
 runtime=/usr/bin/openmineros-control-plane
 backend=hardware-probe
+first_boot_safe=true
+nand_writes_allowed=false
+asic_writes_allowed=false
 flashable=false
 EOF_PLAN
 

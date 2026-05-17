@@ -1,0 +1,47 @@
+#!/bin/sh
+set -eu
+
+REPORT_PATH=${OPENMINEROS_REPORT_PATH:-/var/log/openmineros/first-boot-report.txt}
+mkdir -p "$(dirname "$REPORT_PATH")"
+
+{
+    echo "OpenMinerOS first boot read-only report"
+    echo "generated_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || true)"
+    echo
+    echo "[runtime_env]"
+    if [ -f /etc/openmineros/runtime.env ]; then
+        sed -n '1,120p' /etc/openmineros/runtime.env
+    fi
+    echo
+    echo "[kernel]"
+    uname -a 2>/dev/null || true
+    echo
+    echo "[cmdline]"
+    cat /proc/cmdline 2>/dev/null || true
+    echo
+    echo "[device_tree_model]"
+    tr '\0' '\n' </proc/device-tree/model 2>/dev/null || true
+    echo
+    echo "[device_tree_compatible]"
+    tr '\0' '\n' </proc/device-tree/compatible 2>/dev/null || true
+    echo
+    echo "[mtd]"
+    cat /proc/mtd 2>/dev/null || true
+    echo
+    echo "[partitions]"
+    cat /proc/partitions 2>/dev/null || true
+    echo
+    echo "[mounts]"
+    cat /proc/mounts 2>/dev/null || true
+    echo
+    echo "[serial_devices]"
+    ls -1 /dev/ttyPS* /dev/ttyS* /dev/ttyO* 2>/dev/null || true
+    echo
+    echo "[hwmon]"
+    find /sys/class/hwmon -maxdepth 2 -type f 2>/dev/null | sort || true
+    echo
+    echo "[thermal]"
+    find /sys/class/thermal -maxdepth 2 -type f 2>/dev/null | sort || true
+} > "$REPORT_PATH"
+
+echo "$REPORT_PATH"

@@ -11,6 +11,7 @@ pub mod overview;
 pub mod pool;
 pub mod probe;
 pub mod readiness;
+pub mod recovery;
 pub mod safety;
 pub mod status;
 pub mod stratum;
@@ -52,6 +53,7 @@ pub use readiness::{
     HardwareActionReadiness, HardwareReadinessReport, HardwareReadinessState,
     evaluate_hardware_readiness,
 };
+pub use recovery::{AntiBrickCheck, AntiBrickReport, AntiBrickState};
 pub use safety::{HardwareSafetyGate, HardwareSafetyState, evaluate_hardware_safety};
 pub use status::{
     ChainStatus, HealthStatus, HealthStatusResponse, MinerMode, MinerStatus, RuntimeBackendMode,

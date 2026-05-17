@@ -12,13 +12,13 @@ use clap::Parser;
 use openmineros_common::StratumSubmitPolicy;
 use openmineros_common::status::HealthStatusResponse;
 use openmineros_common::{
-    BoardFamily, ChainStatus, ContributionStatus, DashboardOverview, EventEnvelope, EventsResponse,
-    FirmwareDeploymentReport, HardwareIdentityReport, HardwareProbeReport, HardwareReadinessReport,
-    HardwareSafetyGate, JobPipelinePolicy, MinerStatus, Model, PoolStrategyResponse, PoolSummary,
-    ProfilesResponse, RuntimeBackendMode, RuntimeConfig, RuntimeControlReport, SharePrecheckResult,
-    StratumEngineStatus, StratumShareCandidate, SupportBundle, SystemInfo, TargetCatalog,
-    TuningExecutionStatus, TuningPlanResponse, TuningProtocolTranscript, UpdateStatus,
-    target_catalog,
+    AntiBrickReport, BoardFamily, ChainStatus, ContributionStatus, DashboardOverview,
+    EventEnvelope, EventsResponse, FirmwareDeploymentReport, HardwareIdentityReport,
+    HardwareProbeReport, HardwareReadinessReport, HardwareSafetyGate, JobPipelinePolicy,
+    MinerStatus, Model, PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode,
+    RuntimeConfig, RuntimeControlReport, SharePrecheckResult, StratumEngineStatus,
+    StratumShareCandidate, SupportBundle, SystemInfo, TargetCatalog, TuningExecutionStatus,
+    TuningPlanResponse, TuningProtocolTranscript, UpdateStatus, target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -108,6 +108,7 @@ fn build_app(supervisor: Arc<Supervisor>) -> Router {
         .route("/api/v1/tuning/unlock", post(tuning_unlock))
         .route("/api/v1/profiles", get(profiles))
         .route("/api/v1/firmware/deployment", get(firmware_deployment))
+        .route("/api/v1/firmware/anti-brick", get(firmware_anti_brick))
         .route("/api/v1/tuning/plan", get(tuning_plan))
         .route("/api/v1/tuning/execution", get(tuning_execution))
         .route("/api/v1/tuning/transcript", get(tuning_transcript))
@@ -227,6 +228,10 @@ async fn firmware_deployment(
     Json(supervisor.firmware_deployment_report())
 }
 
+async fn firmware_anti_brick(State(supervisor): State<Arc<Supervisor>>) -> Json<AntiBrickReport> {
+    Json(supervisor.anti_brick_report())
+}
+
 async fn tuning_plan(State(supervisor): State<Arc<Supervisor>>) -> Json<TuningPlanResponse> {
     Json(supervisor.tuning_plan())
 }
@@ -306,7 +311,9 @@ async fn metrics(State(supervisor): State<Arc<Supervisor>>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use openmineros_common::{RuntimeConfig, RuntimeControlReport, SharePrecheckVerdict};
+    use openmineros_common::{
+        AntiBrickReport, AntiBrickState, RuntimeConfig, RuntimeControlReport, SharePrecheckVerdict,
+    };
     use tower::util::ServiceExt;
 
     #[tokio::test]
@@ -636,5 +643,41 @@ mod tests {
         assert!(report.gaps.iter().any(|gap| gap.key == "asic_transport"));
         assert!(report.gaps.iter().any(|gap| gap.key == "bootable_image"));
         assert!(report.gaps.iter().any(|gap| gap.key == "physical_probe"));
+    }
+
+    #[tokio::test]
+    async fn get_firmware_anti_brick_reports_safe_probe_boot() {
+        let supervisor = Arc::new(
+            Supervisor::with_backend_mode(
+                Model::S19jPro,
+                BoardFamily::Xilinx,
+                RuntimeConfig::default(),
+                RuntimeBackendMode::HardwareProbe,
+            )
+            .unwrap(),
+        );
+        let app = build_app(supervisor);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/firmware/anti-brick")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let report: AntiBrickReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.schema_version, 1);
+        assert_eq!(report.state, AntiBrickState::SafeFirstBoot);
+        assert!(report.safe_to_first_boot);
+        assert!(!report.flashing_allowed);
+        assert!(!report.nand_writes_allowed);
+        assert!(!report.asic_writes_allowed);
     }
 }

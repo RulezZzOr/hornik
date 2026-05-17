@@ -1,5 +1,5 @@
 use crate::{
-    ChainStatus, ContributionStatus, EventsResponse, HardwareIdentityReport,
+    AntiBrickReport, ChainStatus, ContributionStatus, EventsResponse, HardwareIdentityReport,
     HardwareReadinessReport, HardwareSafetyGate, HealthStatusResponse, JobPipelinePolicy,
     MinerStatus, PoolRuntimeSummary, PoolStrategyResponse, PoolSummary, ProfilesResponse,
     RuntimeControlReport, StratumEngineStatus, SystemInfo, TuningExecutionStatus,
@@ -14,6 +14,7 @@ pub struct DashboardOverview {
     pub identity: HardwareIdentityReport,
     pub safety: HardwareSafetyGate,
     pub readiness: HardwareReadinessReport,
+    pub anti_brick: AntiBrickReport,
     pub control: RuntimeControlReport,
     pub health: HealthStatusResponse,
     pub miner: MinerStatus,

@@ -10,6 +10,7 @@ images, or perform an in-place upgrade on real hardware.
 - Rollback availability is surfaced through API and UI.
 - No slot mutation happens in this build.
 - `s19-xil` NAND output is a staging bundle only; it is not a writer.
+- `/usr/bin/openmineros-nand-update` is a guard stub and must refuse writes.
 
 ## Future Upgrade Flow
 

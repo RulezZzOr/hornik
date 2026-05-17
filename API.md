@@ -11,6 +11,7 @@ All public REST endpoints are versioned under `/api/v1`.
 - `GET /api/v1/hardware/readiness`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/firmware/deployment`
+- `GET /api/v1/firmware/anti-brick`
 - `GET /api/v1/system/info`
 - `GET /api/v1/system/health`
 - `GET /api/v1/runtime/control`
@@ -31,6 +32,7 @@ Overview response:
   "identity": {},
   "safety": {},
   "readiness": {},
+  "anti_brick": {},
   "control": {},
   "health": {},
   "miner": {},
@@ -258,6 +260,38 @@ Firmware deployment report:
 The report is the current checklist for what still blocks a bootable S19
 firmware image.
 
+Firmware anti-brick report:
+
+```json
+{
+  "schema_version": 1,
+  "board_family": "xilinx",
+  "model": "s19j-pro",
+  "backend": "hardware-probe",
+  "state": "safe_first_boot",
+  "safe_to_first_boot": true,
+  "production_flashable": false,
+  "nand_writes_allowed": false,
+  "asic_writes_allowed": false,
+  "tuning_writes_allowed": false,
+  "flashing_allowed": false,
+  "checks": [
+    {
+      "key": "read_only_backend",
+      "passed": true,
+      "detail": "first S19 boot must use hardware-probe so ASIC dispatch stays disabled"
+    }
+  ],
+  "notes": [
+    "safe_to_first_boot means read-only bring-up only; it does not mean mining is production-ready"
+  ]
+}
+```
+
+This endpoint is the operator gate before first S19 testing. Do not attempt
+NAND or ASIC write paths unless it reports the expected locked state and the
+deployment report is still non-flashable.
+
 Events response:
 
 ```json
@@ -381,6 +415,7 @@ bundles, or reboot the device.
 - `POST /api/v1/tuning/unlock`
 - `GET /api/v1/profiles`
 - `GET /api/v1/firmware/deployment`
+- `GET /api/v1/firmware/anti-brick`
 - `GET /api/v1/tuning/plan`
 - `GET /api/v1/tuning/execution`
 - `GET /api/v1/tuning/transcript`

@@ -24,6 +24,7 @@ Build `0.1.0` is a safe development baseline:
 - Read-only tuning transcript API for chip-by-chip command previews with structured targets.
 - Read-only tuning execution status API that shows the current step, queue, and write gate.
 - Runtime control API for board pause/resume and tuning profile lock without restarting the miner process.
+- Anti-brick report API for read-only first boot gating.
 - Deterministic in-memory event snapshot API.
 - WebSocket event snapshot and heartbeat API.
 - Redacted support bundle API.
@@ -81,6 +82,7 @@ slot and rollback policy.
 - `GET /api/v1/hardware/readiness`
 - `GET /api/v1/hardware/probe`
 - `GET /api/v1/firmware/deployment`
+- `GET /api/v1/firmware/anti-brick`
 - `GET /api/v1/system/health`
 - `GET /api/v1/miner/status`
 - `GET /api/v1/miner/job-pipeline`
@@ -115,6 +117,9 @@ The probe report includes the effective `probe_root` so you can confirm which
 filesystem was scanned.
 `GET /api/v1/firmware/deployment` lists the remaining blockers before the
 project can become a bootable S19 firmware image.
+`GET /api/v1/firmware/anti-brick` must report `safe_to_first_boot=true` before
+first S19 testing. That only means read-only bring-up is guarded; it does not
+mean mining or NAND writes are production-ready.
 `make image` builds the control-plane runtime binary first and embeds it into
 the install bundle. Set `OPENMINEROS_RUNTIME_TARGET` when cross-compiling for a
 real board target; leave it unset for local native development bundles.
