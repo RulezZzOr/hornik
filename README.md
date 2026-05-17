@@ -48,6 +48,8 @@ Open `http://127.0.0.1:8080` for the local status UI.
 
 ```bash
 make image BOARD=s19-xil MODEL=s19j-pro
+make image BOARD=s19-xil MODEL=s19j-pro MEDIA=sd
+make image BOARD=s19-xil MODEL=s19j-pro MEDIA=nand
 make image BOARD=s19-bb MODEL=s19j-pro
 make image BOARD=s19-aml MODEL=s19j-pro
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
@@ -60,6 +62,11 @@ The generated files are reproducible development artefacts in `dist/`.
 They are intentionally not flashable firmware images yet, but the bundle now
 contains the compiled control-plane runtime, device-side launch script, and
 safe boot hooks.
+
+For `s19-xil`, the default `MEDIA=all` build emits both:
+
+- `sd-card-image` for removable SD bring-up,
+- `nand-update-bundle` for onboard NAND staging.
 
 See `INSTALL.md` for the current install-prep flow and `UPGRADE.md` for the
 slot and rollback policy.

@@ -22,6 +22,8 @@ make artifact-budget
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- validate-config --config config/default.toml
 make image BOARD=s19-xil MODEL=s19j-pro
+make image BOARD=s19-xil MODEL=s19j-pro MEDIA=sd
+make image BOARD=s19-xil MODEL=s19j-pro MEDIA=nand
 OPENMINEROS_RUNTIME_TARGET=native make image BOARD=s19-xil MODEL=s19j-pro
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
@@ -45,6 +47,8 @@ Every generated artefact manifest uses schema version `1` and records:
 - board and model,
 - flashable status,
 - artefact kind,
+- install media,
+- install target,
 - artefact byte length,
 - artefact SHA-256 hash,
 - signature metadata.
@@ -56,6 +60,10 @@ run with `--allow-flashable-unsigned` for lab-only testing.
 `make image` always embeds a compiled `openmineros-control-plane` binary into
 the install bundle. Set `OPENMINEROS_RUNTIME_TARGET` to the Rust target triple
 for a real board build; leave it unset or `native` for local development.
+
+`MEDIA=all` is the default. For `s19-xil`, it produces both a removable SD
+model and an onboard NAND staging bundle. Use `MEDIA=sd` or `MEDIA=nand` when
+you need only one target.
 
 ## Size Budget
 
@@ -85,7 +93,7 @@ checks each manifest with:
 
 Default artefact budgets:
 
-- each `install-image`: 64 MiB
+- each `install-image`, `sd-card-image`, `nand-update-bundle`, or `otg-recovery-bundle`: 64 MiB
 - total artefacts per manifest: 80 MiB
 
 Override with `MAX_INSTALL_IMAGE_BYTES` or `MAX_TOTAL_ARTIFACT_BYTES` when an

@@ -9,6 +9,7 @@ images, or perform an in-place upgrade on real hardware.
 - The inactive slot is reported.
 - Rollback availability is surfaced through API and UI.
 - No slot mutation happens in this build.
+- `s19-xil` NAND output is a staging bundle only; it is not a writer.
 
 ## Future Upgrade Flow
 
@@ -30,3 +31,5 @@ health checks.
 
 If the hardware identity, readiness report, or safety gate disagree during an
 upgrade, stop and recover before attempting another write.
+
+For Xilinx/Zynq boards, validate the SD recovery path before any NAND attempt.

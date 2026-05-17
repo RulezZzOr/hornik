@@ -9,6 +9,8 @@ launch script, and recovery hooks for each board family.
 
 ```bash
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
+make install-preflight BOARD=s19-xil MODEL=s19j-pro MEDIA=sd
+make install-preflight BOARD=s19-xil MODEL=s19j-pro MEDIA=nand
 OPENMINEROS_RUNTIME_TARGET=native make install-preflight BOARD=s19-xil MODEL=s19j-pro
 ```
 
@@ -22,6 +24,11 @@ That command:
 For a real board build, set `OPENMINEROS_RUNTIME_TARGET` to the Rust target
 triple used by the board image. Leave it unset or set it to `native` for local
 development bundles.
+
+For `s19-xil`, `MEDIA=all` emits both removable SD and onboard NAND artefacts:
+
+- `openmineros-s19-xil-s19j-pro-0.1.0-sd-card.img.xz`
+- `openmineros-s19-xil-s19j-pro-0.1.0-nand-update.tar.xz`
 
 ## Release Checks
 
@@ -43,6 +50,8 @@ cargo run -p openmineros-commander -- install-plan \
 
 - Preferred recovery path: external SD image.
 - Use this path first for bring-up and rollback.
+- NAND staging is modelled as a separate bundle and must not be written until
+  the partition map, bootloader handoff, and recovery path are verified.
 
 ### BeagleBone Black
 

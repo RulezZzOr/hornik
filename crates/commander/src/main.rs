@@ -61,10 +61,12 @@ enum Command {
     },
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct InstallArtifactSummary {
     path: String,
     kind: String,
+    media: Option<String>,
+    install_target: Option<String>,
     sha256: String,
     bytes: u64,
 }
@@ -80,6 +82,7 @@ struct InstallPlanReport {
     signature_present: bool,
     install_ready: bool,
     install_image: Option<InstallArtifactSummary>,
+    install_artifacts: Vec<InstallArtifactSummary>,
     verified_artifacts: Vec<String>,
     notes: Vec<String>,
 }
@@ -175,18 +178,29 @@ fn main() -> anyhow::Result<()> {
             let release: ReleaseManifest = load_release_manifest_file(&manifest)?;
             let _budget_report =
                 check_manifest_budget_file(&manifest, &artifact_dir, ArtifactBudget::default())?;
-            let install_image = release
+            let install_artifacts = release
                 .artifacts
                 .iter()
-                .find(|artifact| artifact.kind == "install-image")
                 .map(|artifact| InstallArtifactSummary {
                     path: artifact.path.clone(),
                     kind: artifact.kind.clone(),
+                    media: artifact.media.clone(),
+                    install_target: artifact.install_target.clone(),
                     sha256: artifact.sha256.clone(),
                     bytes: artifact.bytes,
-                });
+                })
+                .collect::<Vec<_>>();
+            let install_image = install_artifacts
+                .iter()
+                .find(|artifact| {
+                    matches!(
+                        artifact.kind.as_str(),
+                        "install-image" | "sd-card-image" | "nand-update-bundle"
+                    )
+                })
+                .cloned();
 
-            let install_ready = release.flashable && install_image.is_some();
+            let install_ready = release.flashable && !install_artifacts.is_empty();
 
             let notes = if release.flashable {
                 vec![
@@ -196,7 +210,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 vec![
                     "this build is not flashable yet".to_string(),
-                    "the current artifact packages the compiled device-side runtime and safe boot hooks"
+                    "the current artifacts package the compiled device-side runtime, safe boot hooks, and install media models"
                         .to_string(),
                 ]
             };
@@ -211,6 +225,7 @@ fn main() -> anyhow::Result<()> {
                 signature_present: verification.signature_present,
                 install_ready,
                 install_image,
+                install_artifacts,
                 verified_artifacts: verification.verified_artifacts,
                 notes,
             };

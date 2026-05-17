@@ -14,6 +14,7 @@ Each release bundle must include a manifest with:
 - schema version,
 - board and model,
 - artefact list,
+- install media and install target for each artefact,
 - byte lengths,
 - SHA-256 hashes,
 - signature metadata.
@@ -45,13 +46,15 @@ make install-preflight
 
 Set `OPENMINEROS_RUNTIME_TARGET` when you are building for real hardware.
 Leave it unset or use `native` for local development bundles.
+For `s19-xil`, the default release candidate build emits both `sd-card-image`
+and `nand-update-bundle` artefacts unless `MEDIA=sd` or `MEDIA=nand` is set.
 
 Default `0.1.0` budgets:
 
 - `openmineros-control-plane`: 12 MiB
 - `openmineros-commander`: 8 MiB
 - `web/`: 512 KiB
-- each install-image artefact: 64 MiB
+- each install media artefact: 64 MiB
 - total artefacts per manifest: 80 MiB
 
 Budget increases require an explicit release note because Antminer control

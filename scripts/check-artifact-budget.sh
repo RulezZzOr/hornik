@@ -21,5 +21,5 @@ for board in $boards; do
     --max-install-image-bytes "$max_install_image_bytes" \
     --max-total-artifact-bytes "$max_total_artifact_bytes" >/dev/null
 
-  printf 'artifact-budget: %-8s install image under %s bytes\n' "$board" "$max_install_image_bytes"
+  printf 'artifact-budget: %-8s install media artifacts under %s bytes each\n' "$board" "$max_install_image_bytes"
 done

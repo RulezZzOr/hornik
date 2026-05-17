@@ -49,6 +49,10 @@ impl ReleaseManifest {
 pub struct ArtifactManifest {
     pub path: String,
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub install_target: Option<String>,
     pub sha256: String,
     pub bytes: u64,
 }
@@ -215,7 +219,7 @@ pub fn check_manifest_budget_file(
         }
 
         total_artifact_bytes = total_artifact_bytes.saturating_add(actual_bytes);
-        let max_bytes = if artifact.kind == "install-image" {
+        let max_bytes = if install_sized_artifact(&artifact.kind) {
             Some(budget.max_install_image_bytes)
         } else {
             None
@@ -301,6 +305,13 @@ fn verify_artifact(artifact: &ArtifactManifest, artifact_dir: &Path) -> Result<(
     Ok(())
 }
 
+fn install_sized_artifact(kind: &str) -> bool {
+    matches!(
+        kind,
+        "install-image" | "sd-card-image" | "nand-update-bundle" | "otg-recovery-bundle"
+    )
+}
+
 fn sha256_hex(mut reader: impl Read) -> Result<String, std::io::Error> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 8192];
@@ -338,6 +349,8 @@ mod tests {
             artifacts: vec![ArtifactManifest {
                 path: "image.img.xz".to_string(),
                 kind: "install-image".to_string(),
+                media: None,
+                install_target: None,
                 sha256: "abc".to_string(),
                 bytes: 1,
             }],
@@ -370,6 +383,8 @@ mod tests {
             artifacts: vec![ArtifactManifest {
                 path: "image.img.xz".to_string(),
                 kind: "install-image".to_string(),
+                media: None,
+                install_target: None,
                 sha256: "2f73349cfc4630255319c6c8dfc1b46a8996ace9d14d8e07563b165915918ec2"
                     .to_string(),
                 bytes: 12,
@@ -408,6 +423,8 @@ mod tests {
             artifacts: vec![ArtifactManifest {
                 path: "image.img.xz".to_string(),
                 kind: "install-image".to_string(),
+                media: None,
+                install_target: None,
                 sha256: "2f73349cfc4630255319c6c8dfc1b46a8996ace9d14d8e07563b165915918ec2"
                     .to_string(),
                 bytes: 12,
@@ -425,6 +442,51 @@ mod tests {
             check_manifest_budget_file(&manifest_path, &dir, ArtifactBudget::default()).unwrap();
 
         assert_eq!(report.total_artifact_bytes, 12);
+        assert_eq!(
+            report.checked_artifacts[0].max_bytes,
+            Some(64 * 1024 * 1024)
+        );
+
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn checks_media_specific_artifact_budget() {
+        let dir = temp_dir();
+        let artifact_path = dir.join("nand-update.tar.xz");
+        let mut artifact = File::create(&artifact_path).unwrap();
+        artifact.write_all(b"nand-model\n").unwrap();
+
+        let manifest_path = dir.join("manifest.json");
+        let manifest = ReleaseManifest {
+            schema_version: 1,
+            name: "test".to_string(),
+            version: "0.1.0".to_string(),
+            board: "s19-xil".to_string(),
+            model: "s19j-pro".to_string(),
+            kind: "development-install-bundle".to_string(),
+            flashable: false,
+            artifacts: vec![ArtifactManifest {
+                path: "nand-update.tar.xz".to_string(),
+                kind: "nand-update-bundle".to_string(),
+                media: Some("nand".to_string()),
+                install_target: Some("onboard_nand".to_string()),
+                sha256: "424d747a4518c566f931802c460a001ccf4fe235a45af9900d5e6929bca86319"
+                    .to_string(),
+                bytes: 11,
+            }],
+            signature: None,
+            warning: Some("not flashable".to_string()),
+        };
+        fs::write(
+            &manifest_path,
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let report =
+            check_manifest_budget_file(&manifest_path, &dir, ArtifactBudget::default()).unwrap();
+
         assert_eq!(
             report.checked_artifacts[0].max_bytes,
             Some(64 * 1024 * 1024)
@@ -452,6 +514,8 @@ mod tests {
             artifacts: vec![ArtifactManifest {
                 path: "image.img.xz".to_string(),
                 kind: "install-image".to_string(),
+                media: None,
+                install_target: None,
                 sha256: "2f73349cfc4630255319c6c8dfc1b46a8996ace9d14d8e07563b165915918ec2"
                     .to_string(),
                 bytes: 12,
@@ -485,6 +549,8 @@ mod tests {
         let artifact = ArtifactManifest {
             path: "../image.img.xz".to_string(),
             kind: "install-image".to_string(),
+            media: None,
+            install_target: None,
             sha256: String::new(),
             bytes: 0,
         };
