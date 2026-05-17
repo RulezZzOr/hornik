@@ -2,13 +2,14 @@
 
 Build `0.1.0` is install-prep ready, but it does **not** ship a flashable S19
 firmware image yet. The current release flow prepares and verifies a
-reproducible install bundle with the device-side runtime layout and documents
-the recovery path for each board family.
+reproducible install bundle with the compiled device-side runtime binary,
+launch script, and recovery hooks for each board family.
 
 ## Current Install Prep
 
 ```bash
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
+OPENMINEROS_RUNTIME_TARGET=native make install-preflight BOARD=s19-xil MODEL=s19j-pro
 ```
 
 That command:
@@ -17,6 +18,10 @@ That command:
 2. verifies the manifest,
 3. checks the artefact budget,
 4. prints the install plan for the generated bundle.
+
+For a real board build, set `OPENMINEROS_RUNTIME_TARGET` to the Rust target
+triple used by the board image. Leave it unset or set it to `native` for local
+development bundles.
 
 ## Release Checks
 
@@ -58,6 +63,9 @@ When the flashable image lands, installation will require:
 - a verified recovery medium or update slot,
 - a post-boot health check,
 - rollback instructions for the active/inactive slot pair.
+
+The development bundle already carries the runtime binary and boot hooks, so
+the remaining gap is the flashable image and update/rollback path.
 
 ## Post-Install Check
 

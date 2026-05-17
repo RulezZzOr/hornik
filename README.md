@@ -29,7 +29,7 @@ Build `0.1.0` is a safe development baseline:
 - Redacted support bundle API.
 - Read-only A/B update status API.
 - Expanded Prometheus metrics without secret-bearing labels.
-- Placeholder reproducible image artefact flow for `s19-xil`, `s19-bb`, and `s19-aml`.
+- Reproducible install bundle flow for `s19-xil`, `s19-bb`, and `s19-aml` that embeds the compiled control-plane runtime and boot hooks.
 - Optional, transparent development contribution defaults to `0.0 %` and is capped at `3.0 %`.
 
 This build does **not** flash hardware or ship low-level ASIC drivers yet.
@@ -56,9 +56,10 @@ cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```
 
-The generated files are metadata-only development artefacts in `dist/`.
+The generated files are reproducible development artefacts in `dist/`.
 They are intentionally not flashable firmware images yet, but the bundle now
-contains the device-side runtime layout and safe boot hooks.
+contains the compiled control-plane runtime, device-side launch script, and
+safe boot hooks.
 
 See `INSTALL.md` for the current install-prep flow and `UPGRADE.md` for the
 slot and rollback policy.
@@ -107,6 +108,9 @@ The probe report includes the effective `probe_root` so you can confirm which
 filesystem was scanned.
 `GET /api/v1/firmware/deployment` lists the remaining blockers before the
 project can become a bootable S19 firmware image.
+`make image` builds the control-plane runtime binary first and embeds it into
+the install bundle. Set `OPENMINEROS_RUNTIME_TARGET` when cross-compiling for a
+real board target; leave it unset for local native development bundles.
 `GET /api/v1/hardware/identity` compares the configured board/model with
 read-only evidence and never auto-switches the target in build `0.1.0`.
 `GET /api/v1/hardware/safety` keeps real hardware mining, flashing, tuning

@@ -560,9 +560,9 @@ impl Supervisor {
             FirmwareGap {
                 key: "bootable_image".to_string(),
                 title: "Bootable image packaging".to_string(),
-                state: FirmwareGapState::Missing,
+                state: FirmwareGapState::Partial,
                 detail:
-                    "There is no bootable S19 image/rootfs build, init wiring, or installer artifact yet."
+                    "The development bundle now includes the compiled control-plane runtime and init wiring, but there is still no flashable S19 image or slot-aware installer artifact."
                         .to_string(),
             },
             FirmwareGap {
@@ -655,7 +655,9 @@ impl Supervisor {
             deployable,
             gaps,
             notes: vec![
-                "build 0.1.0 is still missing the real device-side firmware runtime".to_string(),
+                "build 0.1.0 is still missing the real device-side ASIC runtime and flashable image".to_string(),
+                "the development install bundle now embeds the runtime binary and safe boot hooks"
+                    .to_string(),
                 "the report lists the pieces that must exist before a usable S19 image can ship"
                     .to_string(),
             ],

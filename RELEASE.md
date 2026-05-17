@@ -4,8 +4,8 @@ Build `0.1.0` establishes the release safety contract before real SD images
 exist.
 
 The current release flow prepares a reproducible install bundle and install
-plan with the device-side runtime layout, but it does not yet ship a
-flashable production image.
+plan with the compiled device-side runtime binary and boot hooks, but it does
+not yet ship a flashable production image.
 
 ## Manifest Policy
 
@@ -42,6 +42,9 @@ make size-budget
 make artifact-budget
 make install-preflight
 ```
+
+Set `OPENMINEROS_RUNTIME_TARGET` when you are building for real hardware.
+Leave it unset or use `native` for local development bundles.
 
 Default `0.1.0` budgets:
 

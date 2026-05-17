@@ -196,7 +196,7 @@ fn main() -> anyhow::Result<()> {
             } else {
                 vec![
                     "this build is not flashable yet".to_string(),
-                    "the current artifact packages the device-side runtime layout and safe boot hooks"
+                    "the current artifact packages the compiled device-side runtime and safe boot hooks"
                         .to_string(),
                 ]
             };

@@ -1,7 +1,8 @@
 # Build
 
 Build `0.1.0` provides local development builds, tests, and non-flashable board
-artefacts with a packaged device-side runtime layout.
+artefacts with a packaged device-side runtime binary, launch script, and boot
+hooks.
 
 ## Requirements
 
@@ -21,6 +22,7 @@ make artifact-budget
 make run-control-plane BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- validate-config --config config/default.toml
 make image BOARD=s19-xil MODEL=s19j-pro
+OPENMINEROS_RUNTIME_TARGET=native make image BOARD=s19-xil MODEL=s19j-pro
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- verify-manifest \
@@ -50,6 +52,10 @@ Every generated artefact manifest uses schema version `1` and records:
 Build `0.1.0` artefacts are not flashable and intentionally unsigned. The
 verifier rejects any flashable manifest without a signature unless explicitly
 run with `--allow-flashable-unsigned` for lab-only testing.
+
+`make image` always embeds a compiled `openmineros-control-plane` binary into
+the install bundle. Set `OPENMINEROS_RUNTIME_TARGET` to the Rust target triple
+for a real board build; leave it unset or `native` for local development.
 
 ## Size Budget
 
