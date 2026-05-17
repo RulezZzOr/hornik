@@ -1,15 +1,17 @@
 use openmineros_common::{
     BoardFamily, BoardProfile, Capability, CapabilitySet, ChainStatus, HardwareIdentityObservation,
     HardwareIdentityReport, HardwareProbeReport, HealthStatus, MinerMode, MinerStatus, Model,
-    ProbeCheck, ProbeStatus, RuntimeBackendMode, Severity, StratumJobTemplate, SupportLevel,
-    TargetError, TuningPhase, TuningProtocolFrame, TuningProtocolSequenceSpec,
-    infer_hardware_identity, supported_targets,
+    ProbeCheck, ProbeStatus, RuntimeBackendMode, Severity, StratumJobTemplate,
+    StratumShareCandidate, SupportLevel, TargetError, TuningPhase, TuningProtocolFrame,
+    TuningProtocolSequenceSpec, infer_hardware_identity, supported_targets,
 };
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 use std::{
     env,
     fs::{File, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
@@ -27,6 +29,56 @@ pub enum BackendError {
         #[source]
         source: std::io::Error,
     },
+    #[error("failed to receive asic result from {path}: {source}")]
+    ReceiveIo {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to parse asic result from {path}: {source}")]
+    ReceiveFrame {
+        path: String,
+        #[source]
+        source: AsicFrameError,
+    },
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum AsicFrameError {
+    #[error("asic frame is empty")]
+    Empty,
+    #[error("asic frame has invalid prefix: {0}")]
+    InvalidPrefix(String),
+    #[error("asic frame is not a nonce report")]
+    NotNonceReport,
+    #[error("asic frame missing required field: {0}")]
+    MissingField(&'static str),
+    #[error("asic frame has invalid field {field}: {value}")]
+    InvalidField { field: &'static str, value: String },
+    #[error("asic frame checksum mismatch")]
+    ChecksumMismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AsicNonceReport {
+    pub board: BoardFamily,
+    pub job_id: String,
+    pub chip_id: u16,
+    pub extranonce2: String,
+    pub ntime: String,
+    pub nonce: String,
+}
+
+impl AsicNonceReport {
+    pub fn into_share_candidate(self, worker: impl Into<String>) -> StratumShareCandidate {
+        StratumShareCandidate {
+            worker: worker.into(),
+            job_id: self.job_id,
+            extranonce2: self.extranonce2,
+            ntime: self.ntime,
+            nonce: self.nonce,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,6 +97,15 @@ pub enum BackendHandle {
 
 pub trait AsicJobDispatcher {
     fn dispatch_job(&self, job: &StratumJobTemplate) -> Result<(), BackendError>;
+
+    fn collect_share_candidates(
+        &self,
+        worker: &str,
+        max_reports: usize,
+    ) -> Result<Vec<StratumShareCandidate>, BackendError> {
+        let _ = (worker, max_reports);
+        Ok(Vec::new())
+    }
 }
 
 pub fn build_tuning_sequence_frames(
@@ -117,6 +178,100 @@ pub fn build_tuning_protocol_frames(spec: &TuningProtocolSequenceSpec) -> Vec<Tu
             }
         })
         .collect()
+}
+
+pub fn build_nonce_report_frame(
+    board: BoardFamily,
+    job_id: &str,
+    chip_id: u16,
+    extranonce2: &str,
+    ntime: &str,
+    nonce: &str,
+) -> Vec<u8> {
+    AsicProtocol::for_board(board).nonce_report(job_id, chip_id, extranonce2, ntime, nonce)
+}
+
+pub fn parse_nonce_report_frame(frame: &str) -> Result<AsicNonceReport, AsicFrameError> {
+    let frame = frame.trim();
+    if frame.is_empty() {
+        return Err(AsicFrameError::Empty);
+    }
+
+    let Some((body, checksum)) = frame.rsplit_once("|checksum=") else {
+        return Err(AsicFrameError::MissingField("checksum"));
+    };
+    if checksum != checksum_hex(body.as_bytes()) {
+        return Err(AsicFrameError::ChecksumMismatch);
+    }
+
+    let mut parts = body.split('|');
+    let prefix = parts.next().ok_or(AsicFrameError::Empty)?;
+    let board = match prefix {
+        "omo-asic/xilinx/v1" => BoardFamily::Xilinx,
+        "omo-asic/beaglebone/v1" => BoardFamily::BeagleBone,
+        "omo-asic/amlogic/v1" => BoardFamily::Amlogic,
+        "omo-asic/cvitek/v1" => BoardFamily::Cvitek,
+        other => return Err(AsicFrameError::InvalidPrefix(other.to_string())),
+    };
+
+    let mut board_tag = None;
+    let mut command = None;
+    let mut job_id = None;
+    let mut chip_id = None;
+    let mut extranonce2 = None;
+    let mut ntime = None;
+    let mut nonce = None;
+
+    for part in parts {
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
+        match key {
+            "board" => board_tag = Some(value.to_string()),
+            "cmd" => command = Some(value.to_string()),
+            "job_id" => job_id = Some(value.to_string()),
+            "chip_id" => {
+                chip_id = Some(
+                    value
+                        .parse::<u16>()
+                        .map_err(|_| AsicFrameError::InvalidField {
+                            field: "chip_id",
+                            value: value.to_string(),
+                        })?,
+                )
+            }
+            "extranonce2" => extranonce2 = Some(value.to_string()),
+            "ntime" => ntime = Some(value.to_string()),
+            "nonce" => nonce = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    let expected_board_tag = AsicProtocol::for_board(board).board_tag();
+    if board_tag.as_deref() != Some(expected_board_tag) {
+        return Err(AsicFrameError::InvalidField {
+            field: "board",
+            value: board_tag.unwrap_or_default(),
+        });
+    }
+    if command.as_deref() != Some("nonce") {
+        return Err(AsicFrameError::NotNonceReport);
+    }
+
+    let job_id = required_field(job_id, "job_id")?;
+    let chip_id = chip_id.ok_or(AsicFrameError::MissingField("chip_id"))?;
+    let extranonce2 = required_hex_field(extranonce2, "extranonce2", None)?;
+    let ntime = required_hex_field(ntime, "ntime", Some(8))?;
+    let nonce = required_hex_field(nonce, "nonce", Some(8))?;
+
+    Ok(AsicNonceReport {
+        board,
+        job_id,
+        chip_id,
+        extranonce2,
+        ntime,
+        nonce,
+    })
 }
 
 impl BackendHandle {
@@ -219,6 +374,17 @@ impl BackendHandle {
             Self::HardwareMining(backend) => backend.dispatch_job(job),
         }
     }
+
+    pub fn collect_share_candidates(
+        &self,
+        worker: &str,
+        max_reports: usize,
+    ) -> Result<Vec<StratumShareCandidate>, BackendError> {
+        match self {
+            Self::HardwareMining(backend) => backend.collect_share_candidates(worker, max_reports),
+            Self::Simulated(_) | Self::HardwareProbe(_) => Ok(Vec::new()),
+        }
+    }
 }
 
 pub fn build_tuning_execution_steps(
@@ -240,6 +406,14 @@ pub fn build_tuning_execution_steps(
 impl AsicJobDispatcher for BackendHandle {
     fn dispatch_job(&self, job: &StratumJobTemplate) -> Result<(), BackendError> {
         Self::dispatch_job(self, job)
+    }
+
+    fn collect_share_candidates(
+        &self,
+        worker: &str,
+        max_reports: usize,
+    ) -> Result<Vec<StratumShareCandidate>, BackendError> {
+        Self::collect_share_candidates(self, worker, max_reports)
     }
 }
 
@@ -339,7 +513,13 @@ pub struct HardwareMiningBackend {
     support: SupportLevel,
     uart_path: PathBuf,
     protocol: AsicProtocol,
-    uart_transport: Arc<Mutex<Option<File>>>,
+    uart_transport: Arc<Mutex<Option<UartTransport>>>,
+}
+
+#[derive(Debug)]
+struct UartTransport {
+    file: File,
+    rx_buffer: Vec<u8>,
 }
 
 impl HardwareMiningBackend {
@@ -477,29 +657,119 @@ impl HardwareMiningBackend {
             .lock()
             .expect("uart transport mutex poisoned");
         if transport.is_none() {
-            let fd = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&self.uart_path)
-                .map_err(|source| BackendError::DispatchIo {
-                    path: self.uart_path.display().to_string(),
-                    source,
-                })?;
-            *transport = Some(fd);
+            *transport =
+                Some(
+                    self.open_uart_transport()
+                        .map_err(|source| BackendError::DispatchIo {
+                            path: self.uart_path.display().to_string(),
+                            source,
+                        })?,
+                );
         }
-        let fd = transport
+        let transport = transport
             .as_mut()
             .expect("uart transport must be initialized");
-        fd.write_all(&payload)
+        transport
+            .file
+            .write_all(&payload)
             .map_err(|source| BackendError::DispatchIo {
                 path: self.uart_path.display().to_string(),
                 source,
             })?;
-        fd.flush().map_err(|source| BackendError::DispatchIo {
-            path: self.uart_path.display().to_string(),
-            source,
-        })?;
+        transport
+            .file
+            .flush()
+            .map_err(|source| BackendError::DispatchIo {
+                path: self.uart_path.display().to_string(),
+                source,
+            })?;
         Ok(())
+    }
+
+    pub fn read_nonce_reports(
+        &self,
+        max_reports: usize,
+    ) -> Result<Vec<AsicNonceReport>, BackendError> {
+        if max_reports == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut transport = self
+            .uart_transport
+            .lock()
+            .expect("uart transport mutex poisoned");
+        if transport.is_none() {
+            *transport =
+                Some(
+                    self.open_uart_transport()
+                        .map_err(|source| BackendError::ReceiveIo {
+                            path: self.uart_path.display().to_string(),
+                            source,
+                        })?,
+                );
+        }
+        let transport = transport
+            .as_mut()
+            .expect("uart transport must be initialized");
+
+        let mut reports = Vec::new();
+        let mut scratch = [0_u8; 512];
+        loop {
+            match transport.file.read(&mut scratch) {
+                Ok(0) => break,
+                Ok(bytes_read) => {
+                    transport
+                        .rx_buffer
+                        .extend_from_slice(&scratch[..bytes_read]);
+                    while reports.len() < max_reports {
+                        let Some(line) = pop_line(&mut transport.rx_buffer) else {
+                            break;
+                        };
+                        match parse_nonce_report_frame(&line) {
+                            Ok(report) => reports.push(report),
+                            Err(AsicFrameError::Empty | AsicFrameError::NotNonceReport) => {}
+                            Err(source) => {
+                                return Err(BackendError::ReceiveFrame {
+                                    path: self.uart_path.display().to_string(),
+                                    source,
+                                });
+                            }
+                        }
+                    }
+                    if reports.len() >= max_reports {
+                        break;
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        || error.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    break;
+                }
+                Err(source) => {
+                    return Err(BackendError::ReceiveIo {
+                        path: self.uart_path.display().to_string(),
+                        source,
+                    });
+                }
+            }
+        }
+
+        Ok(reports)
+    }
+
+    pub fn collect_share_candidates(
+        &self,
+        worker: &str,
+        max_reports: usize,
+    ) -> Result<Vec<StratumShareCandidate>, BackendError> {
+        self.read_nonce_reports(max_reports).map(|reports| {
+            reports
+                .into_iter()
+                .map(|report| report.into_share_candidate(worker.to_string()))
+                .collect()
+        })
     }
 
     pub fn build_set_frequency_frame(&self, chip_id: u16, frequency_mhz: u16) -> Vec<u8> {
@@ -527,6 +797,17 @@ impl HardwareMiningBackend {
             step_frequency_mhz,
             step_voltage_mv,
         )
+    }
+
+    fn open_uart_transport(&self) -> std::io::Result<UartTransport> {
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_NONBLOCK);
+        options.open(&self.uart_path).map(|file| UartTransport {
+            file,
+            rx_buffer: Vec::new(),
+        })
     }
 }
 
@@ -612,6 +893,28 @@ impl AsicProtocol {
             time: job.time.clone(),
             clean_jobs: job.clean_jobs,
         }))
+    }
+
+    fn nonce_report(
+        &self,
+        job_id: &str,
+        chip_id: u16,
+        extranonce2: &str,
+        ntime: &str,
+        nonce: &str,
+    ) -> Vec<u8> {
+        let body = format!(
+            "{}|board={}|cmd=nonce|job_id={}|chip_id={}|extranonce2={}|ntime={}|nonce={}",
+            self.frame_prefix(),
+            self.board_tag(),
+            job_id,
+            chip_id,
+            extranonce2,
+            ntime,
+            nonce
+        );
+        let checksum = checksum_hex(body.as_bytes());
+        format!("{body}|checksum={checksum}\n").into_bytes()
     }
 
     fn set_frequency(&self, chip_id: u16, frequency_mhz: u16) -> Vec<u8> {
@@ -713,6 +1016,33 @@ fn checksum_hex(bytes: &[u8]) -> String {
         .take(8)
         .map(|byte| format!("{:02x}", byte))
         .collect()
+}
+
+fn pop_line(buffer: &mut Vec<u8>) -> Option<String> {
+    let newline = buffer.iter().position(|byte| *byte == b'\n')?;
+    let line: Vec<u8> = buffer.drain(..=newline).collect();
+    Some(String::from_utf8_lossy(&line).trim().to_string())
+}
+
+fn required_field(value: Option<String>, field: &'static str) -> Result<String, AsicFrameError> {
+    let value = value.ok_or(AsicFrameError::MissingField(field))?;
+    if value.trim().is_empty() {
+        return Err(AsicFrameError::InvalidField { field, value });
+    }
+    Ok(value)
+}
+
+fn required_hex_field(
+    value: Option<String>,
+    field: &'static str,
+    exact_len: Option<usize>,
+) -> Result<String, AsicFrameError> {
+    let value = required_field(value, field)?;
+    let has_valid_len = exact_len.map_or(value.len() % 2 == 0, |len| value.len() == len);
+    if !has_valid_len || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(AsicFrameError::InvalidField { field, value });
+    }
+    Ok(value)
 }
 
 impl HardwareProbeBackend {
@@ -1225,6 +1555,120 @@ mod tests {
         assert!(content.contains("omo-asic/xilinx/v1|board=xilinx|cmd=notify|job_id=job-1"));
         assert!(content.contains("|checksum="));
         assert_eq!(content.matches("omo-asic/xilinx/v1").count(), 2);
+
+        let _ = fs::remove_file(&uart_path);
+    }
+
+    #[test]
+    fn nonce_report_frame_round_trips_into_share_candidate() {
+        let frame = build_nonce_report_frame(
+            BoardFamily::Xilinx,
+            "job-42",
+            7,
+            "00000002",
+            "5f5e1000",
+            "00000001",
+        );
+        let frame = String::from_utf8(frame).unwrap();
+        let report = parse_nonce_report_frame(&frame).unwrap();
+
+        assert_eq!(report.board, BoardFamily::Xilinx);
+        assert_eq!(report.job_id, "job-42");
+        assert_eq!(report.chip_id, 7);
+
+        let candidate = report.into_share_candidate("acct.worker");
+        assert_eq!(candidate.worker, "acct.worker");
+        assert_eq!(candidate.job_id, "job-42");
+        assert_eq!(candidate.extranonce2, "00000002");
+        assert_eq!(candidate.ntime, "5f5e1000");
+        assert_eq!(candidate.nonce, "00000001");
+    }
+
+    #[test]
+    fn nonce_report_rejects_bad_checksum() {
+        let mut frame = String::from_utf8(build_nonce_report_frame(
+            BoardFamily::Xilinx,
+            "job-42",
+            7,
+            "00000002",
+            "5f5e1000",
+            "00000001",
+        ))
+        .unwrap();
+        frame = frame.replace("00000001", "00000002");
+
+        assert_eq!(
+            parse_nonce_report_frame(&frame).unwrap_err(),
+            AsicFrameError::ChecksumMismatch
+        );
+    }
+
+    #[test]
+    fn nonce_report_rejects_invalid_nonce() {
+        let body = "omo-asic/xilinx/v1|board=xilinx|cmd=nonce|job_id=job-42|chip_id=7|extranonce2=00000002|ntime=5f5e1000|nonce=nothex";
+        let checksum = checksum_hex(body.as_bytes());
+        let frame = format!("{body}|checksum={checksum}\n");
+
+        assert!(matches!(
+            parse_nonce_report_frame(&frame),
+            Err(AsicFrameError::InvalidField { field: "nonce", .. })
+        ));
+    }
+
+    #[test]
+    fn nonce_report_rejects_mismatched_board_tag() {
+        let body = "omo-asic/xilinx/v1|board=beaglebone|cmd=nonce|job_id=job-42|chip_id=7|extranonce2=00000002|ntime=5f5e1000|nonce=00000001";
+        let checksum = checksum_hex(body.as_bytes());
+        let frame = format!("{body}|checksum={checksum}\n");
+
+        assert!(matches!(
+            parse_nonce_report_frame(&frame),
+            Err(AsicFrameError::InvalidField { field: "board", .. })
+        ));
+    }
+
+    #[test]
+    fn hardware_mining_backend_collects_nonce_reports_from_uart() {
+        let uart_path = temp_uart_path();
+        fs::File::create(&uart_path).unwrap();
+        let backend = HardwareMiningBackend::with_uart_path(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            uart_path.clone(),
+        )
+        .unwrap();
+        let job = StratumJobTemplate {
+            job_id: "job-42".to_string(),
+            prev_hash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                .to_string(),
+            merkle_branch_len: 0,
+            version: "20000000".to_string(),
+            bits: "1d00ffff".to_string(),
+            time: "5f5e1000".to_string(),
+            clean_jobs: true,
+        };
+        backend.dispatch_job(&job).unwrap();
+        let nonce_report = build_nonce_report_frame(
+            BoardFamily::Xilinx,
+            "job-42",
+            3,
+            "00000002",
+            "5f5e1000",
+            "00000001",
+        );
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&uart_path)
+            .unwrap()
+            .write_all(&nonce_report)
+            .unwrap();
+
+        let candidates = backend.collect_share_candidates("acct.worker", 4).unwrap();
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].worker, "acct.worker");
+        assert_eq!(candidates[0].job_id, "job-42");
+        assert_eq!(candidates[0].nonce, "00000001");
 
         let _ = fs::remove_file(&uart_path);
     }

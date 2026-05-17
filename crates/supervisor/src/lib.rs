@@ -1617,6 +1617,7 @@ impl StratumEngine {
         }
 
         self.read_messages();
+        self.submit_asic_share_candidates();
         self.update_live_state();
         self.status.submit_policy.enabled_in_build = socket_enabled;
     }
@@ -1809,6 +1810,34 @@ impl StratumEngine {
         }
     }
 
+    fn submit_asic_share_candidates(&mut self) {
+        if !self.dispatch_enabled {
+            return;
+        }
+        let Some(worker) = self.active_pool.as_ref().map(|pool| pool.user.clone()) else {
+            return;
+        };
+        let max_reports = usize::from(self.status.submit_policy.max_submit_queue_depth);
+        let candidates = match self
+            .dispatcher
+            .collect_share_candidates(&worker, max_reports)
+        {
+            Ok(candidates) => candidates,
+            Err(error) => {
+                self.status.state = StratumEngineState::Degraded;
+                self.status.notes = vec![format!("asic result receive failed: {}", error)];
+                return;
+            }
+        };
+
+        for candidate in candidates {
+            let result = self.submit_share(candidate);
+            if !result.submit_allowed {
+                self.status.notes = result.reasons;
+            }
+        }
+    }
+
     fn update_live_state(&mut self) {
         if self.status.socket_open && self.status.subscribed && self.status.authorized {
             self.status.state = StratumEngineState::Live;
@@ -1989,6 +2018,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct MockDispatcher {
         dispatched_jobs: Mutex<Vec<String>>,
+        share_candidates: Mutex<Vec<openmineros_common::StratumShareCandidate>>,
     }
 
     impl openmineros_asic_backend::AsicJobDispatcher for MockDispatcher {
@@ -2001,6 +2031,25 @@ mod tests {
                 .unwrap()
                 .push(job.job_id.clone());
             Ok(())
+        }
+
+        fn collect_share_candidates(
+            &self,
+            worker: &str,
+            max_reports: usize,
+        ) -> Result<
+            Vec<openmineros_common::StratumShareCandidate>,
+            openmineros_asic_backend::BackendError,
+        > {
+            let mut candidates = self.share_candidates.lock().unwrap();
+            let take = max_reports.min(candidates.len());
+            Ok(candidates
+                .drain(0..take)
+                .map(|mut candidate| {
+                    candidate.worker = worker.to_string();
+                    candidate
+                })
+                .collect())
         }
     }
 
@@ -2057,6 +2106,7 @@ mod tests {
                 .write_all(
                     br#"{"id":1,"result":[true,"extranonce1",4],"error":null}
 {"id":2,"result":true,"error":null}
+{"id":null,"method":"mining.set_difficulty","params":[4096]}
 {"id":null,"method":"mining.notify","params":["job-7","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","","",[],"20000000","1a2b3c4d","5e6f7788",true]}
 "#,
                 )
@@ -2243,6 +2293,45 @@ mod tests {
                 .iter()
                 .any(|line| line.contains(r#""method":"mining.submit""#))
         );
+    }
+
+    #[test]
+    fn hardware_mining_poll_submits_asic_nonce_candidates_to_pool() {
+        let dispatcher = Arc::new(MockDispatcher {
+            share_candidates: Mutex::new(vec![StratumShareCandidate {
+                worker: String::new(),
+                job_id: "job-7".to_string(),
+                extranonce2: "00000002".to_string(),
+                ntime: "69fc901d".to_string(),
+                nonce: "00000001".to_string(),
+            }]),
+            ..MockDispatcher::default()
+        });
+        let (pool_url, captured) = spawn_mock_stratum_submit_server();
+        let mut engine = StratumEngine::new(
+            vec![PoolConfig {
+                priority: 0,
+                url: pool_url,
+                user: "acct.worker".to_string(),
+                password: "x".to_string(),
+                enabled: true,
+            }],
+            JobPipelinePolicy::from(PoolConnectionPolicy::default()),
+            PoolConnectionPolicy::default(),
+            RuntimeBackendMode::HardwareMining,
+            Some(0),
+            dispatcher,
+        );
+
+        engine.poll(true, true);
+        thread::sleep(Duration::from_millis(50));
+
+        assert_eq!(engine.status.shares_submitted, 1);
+        assert!(captured.lock().unwrap().iter().any(|line| {
+            line.contains(r#""method":"mining.submit""#)
+                && line.contains("acct.worker")
+                && line.contains("00000001")
+        }));
     }
 
     #[test]
