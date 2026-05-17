@@ -105,3 +105,16 @@ curl -s http://127.0.0.1:8080/api/v1/firmware/anti-brick | jq
 
 The target is not considered ready until the safety gate, hardware identity,
 and deployment report all agree on the same board family and model.
+
+## SD First-Boot Test Package
+
+Use the scripted SD test path before any NAND work:
+
+```bash
+make sd-test-package BOARD=s19-xil MODEL=s19j-pro
+make sd-test-verify BOARD=s19-xil MODEL=s19j-pro
+MINER_HOST=<miner-ip> MINER_USER=root make first-boot-collect
+```
+
+See `S19_SD_TEST.md` for the full operator checklist. The SD artifact is a
+compressed rootfs tar model, not a raw `dd` image.

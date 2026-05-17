@@ -27,6 +27,8 @@ make image BOARD=s19-xil MODEL=s19j-pro MEDIA=nand
 OPENMINEROS_RUNTIME_TARGET=native make image BOARD=s19-xil MODEL=s19j-pro
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
+make sd-test-package BOARD=s19-xil MODEL=s19j-pro
+make sd-test-verify BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```

@@ -3,8 +3,9 @@ MODEL ?= s19j-pro
 VERSION ?= 0.1.0
 DIST_DIR ?= dist
 MEDIA ?= all
+SD_MOUNT ?=
 
-.PHONY: bootstrap fmt clippy test release size-budget artifact-budget run-control-plane image install-preflight verify-repro clean
+.PHONY: bootstrap fmt clippy test release size-budget artifact-budget run-control-plane image install-preflight verify-repro sd-test-package sd-test-verify sd-test-extract first-boot-collect clean
 
 bootstrap:
 	cargo fetch
@@ -38,6 +39,18 @@ install-preflight:
 
 verify-repro:
 	./scripts/verify-repro.sh "$(BOARD)" "$(MODEL)" "$(VERSION)" "$(MEDIA)"
+
+sd-test-package:
+	./scripts/prepare-sd-test.sh "$(BOARD)" "$(MODEL)" "$(VERSION)" "$(DIST_DIR)"
+
+sd-test-verify:
+	./scripts/verify-sd-test-bundle.sh "$(BOARD)" "$(MODEL)" "$(VERSION)" "$(DIST_DIR)"
+
+sd-test-extract:
+	./scripts/extract-sd-test-rootfs.sh "$(DIST_DIR)/openmineros-$(BOARD)-$(MODEL)-$(VERSION)-sd-card.img.xz" "$(SD_MOUNT)"
+
+first-boot-collect:
+	./scripts/collect-s19-first-boot.sh
 
 clean:
 	cargo clean

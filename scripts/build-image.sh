@@ -155,8 +155,10 @@ package_media() {
   package_file="${name}-${package_suffix}"
   package_path="$dist_abs/$package_file"
   package_filelist="$dist_abs/${name}-${package_media_name}-filelist.txt"
+  package_tmp_tar="$dist_abs/${package_file}.tmp.tar"
 
   rm -rf "$package_rootfs"
+  rm -f "$package_tmp_tar" "$package_path"
   mkdir -p "$package_rootfs"
   cp -R "$rootfs_base"/. "$package_rootfs"/
 
@@ -216,8 +218,10 @@ EOF_PLAN
   (
     cd "$package_rootfs"
     find . -type f | LC_ALL=C sort > "$package_filelist"
-    tar -cf - -T "$package_filelist" | xz -c > "$package_path"
+    tar -cf "$package_tmp_tar" -T "$package_filelist"
+    xz -c "$package_tmp_tar" > "$package_path"
   )
+  rm -f "$package_tmp_tar"
   rm -f "$package_filelist"
 
   append_artifact "$package_file" "$package_kind" "$package_media_name" "$package_target"
