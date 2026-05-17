@@ -7,6 +7,8 @@ miner_port="${MINER_PORT:-22}"
 report_root="${REPORT_DIR:-dist/first-boot-reports}"
 ssh_batch_mode="${SSH_BATCH_MODE:-no}"
 ssh_connect_timeout="${SSH_CONNECT_TIMEOUT:-10}"
+ssh_strict_host_key_checking="${SSH_STRICT_HOST_KEY_CHECKING:-accept-new}"
+ssh_key="${SSH_KEY:-}"
 
 fail() {
   echo "collect-s19-first-boot: $*" >&2
@@ -21,12 +23,24 @@ out_dir="$report_root/${safe_host}-${stamp}"
 mkdir -p "$out_dir"
 
 remote() {
-  ssh \
-    -p "$miner_port" \
-    -o "BatchMode=$ssh_batch_mode" \
-    -o "ConnectTimeout=$ssh_connect_timeout" \
-    "$miner_user@$miner_host" \
-    "$@"
+  if [ -n "$ssh_key" ]; then
+    ssh \
+      -i "$ssh_key" \
+      -p "$miner_port" \
+      -o "BatchMode=$ssh_batch_mode" \
+      -o "ConnectTimeout=$ssh_connect_timeout" \
+      -o "StrictHostKeyChecking=$ssh_strict_host_key_checking" \
+      "$miner_user@$miner_host" \
+      "$@"
+  else
+    ssh \
+      -p "$miner_port" \
+      -o "BatchMode=$ssh_batch_mode" \
+      -o "ConnectTimeout=$ssh_connect_timeout" \
+      -o "StrictHostKeyChecking=$ssh_strict_host_key_checking" \
+      "$miner_user@$miner_host" \
+      "$@"
+  fi
 }
 
 collect_command() {
@@ -60,6 +74,7 @@ require_json_bool() {
 echo "miner_host=$miner_host" > "$out_dir/metadata.txt"
 echo "miner_user=$miner_user" >> "$out_dir/metadata.txt"
 echo "miner_port=$miner_port" >> "$out_dir/metadata.txt"
+echo "ssh_key=${ssh_key:-not-set}" >> "$out_dir/metadata.txt"
 echo "generated_utc=$stamp" >> "$out_dir/metadata.txt"
 : > "$out_dir/verdict.txt"
 
@@ -79,6 +94,7 @@ collect_command "install-media.json" "cat /etc/openmineros/install-media.json 2>
 collect_command "first-boot-report.path" "/usr/bin/openmineros-first-boot-report 2>&1 || true"
 collect_command "first-boot-report.txt" "cat /var/log/openmineros/first-boot-report.txt 2>/dev/null || true"
 collect_command "safe-self-test.txt" "/usr/bin/openmineros-safe-self-test 2>&1 || true"
+collect_command "ssh-check.txt" "/usr/bin/openmineros-ssh-check 2>&1 || true"
 collect_command "nand-guard.txt" "rc=0; /usr/bin/openmineros-nand-update >/tmp/openmineros-nand-guard.out 2>&1 || rc=\$?; cat /tmp/openmineros-nand-guard.out; echo exit_code=\$rc; [ \"\$rc\" = 78 ]"
 collect_command "processes.txt" "ps w 2>/dev/null || ps 2>/dev/null || true"
 collect_command "mounts.txt" "cat /proc/mounts 2>/dev/null || true"
@@ -113,6 +129,15 @@ if grep -Eq 'exit_code=78' "$out_dir/nand-guard.txt"; then
   echo "PASS nand guard refused writes with exit 78" >> "$out_dir/verdict.txt"
 else
   echo "FAIL nand guard did not return exit 78" >> "$out_dir/verdict.txt"
+  failed=1
+fi
+
+if grep -Eq 'PASS tcp port 22 listening|SKIP netstat unavailable' "$out_dir/ssh-check.txt" \
+  && grep -Eq 'PASS dropbear process running' "$out_dir/ssh-check.txt" \
+  && grep -Eq 'PASS root authorized_keys present' "$out_dir/ssh-check.txt"; then
+  echo "PASS ssh dropbear key-based access configured" >> "$out_dir/verdict.txt"
+else
+  echo "FAIL ssh dropbear key-based access is not fully confirmed" >> "$out_dir/verdict.txt"
   failed=1
 fi
 

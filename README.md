@@ -55,6 +55,7 @@ make image BOARD=s19-bb MODEL=s19j-pro
 make image BOARD=s19-aml MODEL=s19j-pro
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
+make sd-test-package BOARD=s19-xil MODEL=s19j-pro
 cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```
@@ -63,6 +64,10 @@ The generated files are reproducible development artefacts in `dist/`.
 They are intentionally not flashable firmware images yet, but the bundle now
 contains the compiled control-plane runtime, device-side launch script, and
 safe boot hooks.
+
+`make sd-test-package` prepares the guarded first-boot SD package with DHCP on
+`eth0`, Dropbear SSH on port `22`, generated key-based root access, and local
+self-test scripts for collecting the first hardware report.
 
 For `s19-xil`, the default `MEDIA=all` build emits both:
 

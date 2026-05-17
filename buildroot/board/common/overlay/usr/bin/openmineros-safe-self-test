@@ -69,6 +69,14 @@ failed=0
     api_get /api/v1/hardware/readiness 2>/dev/null || true
     echo
 
+    echo "[ssh]"
+    if /usr/bin/openmineros-ssh-check; then
+        :
+    else
+        failed=1
+    fi
+    echo
+
     echo "[checks]"
     check_file_flag '^OPENMINEROS_BACKEND=hardware-probe$' /etc/openmineros/runtime.env || failed=1
     check_file_flag '^OPENMINEROS_FIRST_BOOT_SAFE=1$' /etc/openmineros/runtime.env || failed=1

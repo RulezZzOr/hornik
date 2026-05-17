@@ -113,7 +113,10 @@ Use the scripted SD test path before any NAND work:
 ```bash
 make sd-test-package BOARD=s19-xil MODEL=s19j-pro
 make sd-test-verify BOARD=s19-xil MODEL=s19j-pro
-MINER_HOST=<miner-ip> MINER_USER=root make first-boot-collect
+MINER_HOST=<miner-ip> \
+  MINER_USER=root \
+  SSH_KEY=dist/openmineros-s19-xil-s19j-pro-0.1.0-sd-test/ssh/id_ed25519 \
+  make first-boot-collect
 ```
 
 See `S19_SD_TEST.md` for the full operator checklist. The SD artifact is a

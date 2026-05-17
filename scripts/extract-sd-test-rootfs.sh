@@ -35,11 +35,16 @@ xz -dc "$artifact" | tar -tf - > "$archive_list"
 for required in \
   ./etc/openmineros/runtime.env \
   ./etc/openmineros/release.json \
+  ./etc/openmineros/ssh.json \
   ./etc/openmineros/install-media.json \
+  ./etc/default/dropbear \
+  ./etc/network/interfaces \
+  ./root/.ssh/authorized_keys \
   ./usr/bin/openmineros-control-plane \
   ./usr/bin/openmineros-launch \
   ./usr/bin/openmineros-first-boot-report \
   ./usr/bin/openmineros-safe-self-test \
+  ./usr/bin/openmineros-ssh-check \
   ./usr/bin/openmineros-nand-update
 do
   grep -qx "$required" "$archive_list" || fail "artifact missing $required"

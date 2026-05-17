@@ -33,6 +33,11 @@ cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```
 
+`make sd-test-package` generates a local test SSH key by default and embeds its
+public key into the SD rootfs for first-boot collection. Set
+`OPENMINEROS_SSH_AUTHORIZED_KEYS=/path/to/id_ed25519.pub` to use an existing
+public key instead.
+
 ## Supported Board Values
 
 - `s19-xil`

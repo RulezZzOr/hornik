@@ -37,6 +37,8 @@ runtime_binary_root="$cargo_target_root"
 runtime_binary_label="$runtime_target"
 runtime_binary_source=""
 artifacts_json="$dist_abs/${name}-artifacts.json"
+ssh_authorized_keys="${OPENMINEROS_SSH_AUTHORIZED_KEYS:-}"
+ssh_authorized_keys_present=false
 
 rm -f "$dist_abs/${name}-manifest.json" "$dist_abs/${name}-sha256sum.txt" "$dist_abs/${name}-"*.xz
 
@@ -82,9 +84,21 @@ if [ -d "$overlay" ]; then
 fi
 
 mkdir -p "$rootfs_base/etc/openmineros" "$rootfs_base/usr/share/openmineros" "$rootfs_base/var/log/openmineros"
+mkdir -p "$rootfs_base/etc/default" "$rootfs_base/etc/network" "$rootfs_base/root/.ssh"
 mkdir -p "$rootfs_base/usr/bin"
 cp "$runtime_binary_source" "$rootfs_base/usr/bin/openmineros-control-plane"
 chmod 0755 "$rootfs_base/usr/bin/openmineros-control-plane"
+
+if [ -n "$ssh_authorized_keys" ]; then
+  if [ ! -f "$ssh_authorized_keys" ]; then
+    echo "OPENMINEROS_SSH_AUTHORIZED_KEYS points to a missing file: $ssh_authorized_keys" >&2
+    exit 2
+  fi
+  cp "$ssh_authorized_keys" "$rootfs_base/root/.ssh/authorized_keys"
+  chmod 0700 "$rootfs_base/root/.ssh"
+  chmod 0600 "$rootfs_base/root/.ssh/authorized_keys"
+  ssh_authorized_keys_present=true
+fi
 
 cat > "$rootfs_base/etc/openmineros/release.json" <<EOF_RELEASE
 {
@@ -99,9 +113,32 @@ cat > "$rootfs_base/etc/openmineros/release.json" <<EOF_RELEASE
   "first_boot_safe": true,
   "nand_writes_allowed": false,
   "asic_writes_allowed": false,
+  "ssh": {
+    "daemon": "dropbear",
+    "port": 22,
+    "password_login": false,
+    "authorized_keys_present": $ssh_authorized_keys_present
+  },
   "flashable": false
 }
 EOF_RELEASE
+
+cat > "$rootfs_base/etc/openmineros/ssh.json" <<EOF_SSH
+{
+  "schema_version": 1,
+  "daemon": "dropbear",
+  "port": 22,
+  "network_interface": "eth0",
+  "network_mode": "dhcp",
+  "password_login": false,
+  "authorized_keys_present": $ssh_authorized_keys_present,
+  "dropbear_args": "-R -E -s -p 22",
+  "notes": [
+    "ssh is intended for first-boot report collection and lab recovery",
+    "password login is disabled; use the private key matching /root/.ssh/authorized_keys"
+  ]
+}
+EOF_SSH
 
 cat > "$rootfs_base/usr/share/openmineros/install-readme.txt" <<EOF_README
 OpenMinerOS $version install bundle
@@ -113,6 +150,10 @@ install_media=$media
 first_boot_safe=true
 nand_writes_allowed=false
 asic_writes_allowed=false
+ssh_daemon=dropbear
+ssh_port=22
+ssh_password_login=false
+ssh_authorized_keys_present=$ssh_authorized_keys_present
 flashable=false
 This bundle contains the compiled device-side runtime, safe boot hooks, and
 the install-time launch script.
@@ -175,6 +216,12 @@ package_media() {
   "first_boot_safe": true,
   "nand_writes_allowed": false,
   "asic_writes_allowed": false,
+  "ssh": {
+    "daemon": "dropbear",
+    "port": 22,
+    "password_login": false,
+    "authorized_keys_present": $ssh_authorized_keys_present
+  },
   "flashable": false
 }
 EOF_RELEASE_MEDIA
@@ -192,10 +239,17 @@ EOF_RELEASE_MEDIA
   "first_boot_safe": true,
   "nand_writes_allowed": false,
   "asic_writes_allowed": false,
+  "ssh": {
+    "daemon": "dropbear",
+    "port": 22,
+    "password_login": false,
+    "authorized_keys_present": $ssh_authorized_keys_present
+  },
   "flashable": false,
   "notes": [
     "development media model for S19 bring-up",
     "first boot is forced to hardware-probe read-only mode",
+    "dropbear ssh is configured for key-based first-boot collection",
     "do not write NAND without a verified partition map and recovery path"
   ]
 }
@@ -211,6 +265,10 @@ backend=hardware-probe
 first_boot_safe=true
 nand_writes_allowed=false
 asic_writes_allowed=false
+ssh_daemon=dropbear
+ssh_port=22
+ssh_password_login=false
+ssh_authorized_keys_present=$ssh_authorized_keys_present
 flashable=false
 EOF_PLAN
 

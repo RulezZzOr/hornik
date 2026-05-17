@@ -15,6 +15,17 @@ The package is created under:
 dist/openmineros-s19-xil-s19j-pro-0.1.0-sd-test
 ```
 
+The package generates a local test SSH key when `OPENMINEROS_SSH_AUTHORIZED_KEYS`
+is not set:
+
+```text
+dist/openmineros-s19-xil-s19j-pro-0.1.0-sd-test/ssh/id_ed25519
+dist/openmineros-s19-xil-s19j-pro-0.1.0-sd-test/ssh/id_ed25519.pub
+```
+
+The public key is embedded into `/root/.ssh/authorized_keys`. Password SSH login
+is disabled.
+
 ## Verify Package
 
 ```bash
@@ -30,6 +41,8 @@ This checks:
 - first boot safe mode,
 - NAND writes disabled,
 - ASIC writes disabled,
+- Dropbear SSH on port `22`,
+- root `authorized_keys`,
 - flashable flag disabled.
 
 ## Stage Rootfs To SD
@@ -60,9 +73,12 @@ OPENMINEROS_DISABLE_ASIC_WRITES=1
 OPENMINEROS_ALLOW_UNSAFE_HARDWARE=0
 ```
 
+Network is DHCP on `eth0`. SSH is Dropbear on TCP `22` with key auth only.
+
 On the miner, a local check is available:
 
 ```bash
+/usr/bin/openmineros-ssh-check
 /usr/bin/openmineros-safe-self-test
 /usr/bin/openmineros-first-boot-report
 ```
@@ -70,7 +86,10 @@ On the miner, a local check is available:
 ## Collect Report From Host
 
 ```bash
-MINER_HOST=<miner-ip> MINER_USER=root make first-boot-collect
+MINER_HOST=<miner-ip> \
+MINER_USER=root \
+SSH_KEY=dist/openmineros-s19-xil-s19j-pro-0.1.0-sd-test/ssh/id_ed25519 \
+make first-boot-collect
 ```
 
 The collector writes:
@@ -92,5 +111,11 @@ Required values from `/api/v1/firmware/anti-brick`:
 Required NAND guard behavior:
 
 - `/usr/bin/openmineros-nand-update` exits with code `78`
+
+Required SSH behavior:
+
+- Dropbear process running
+- TCP port `22` listening
+- `/root/.ssh/authorized_keys` present
 
 Stop testing immediately if any of those checks fail.

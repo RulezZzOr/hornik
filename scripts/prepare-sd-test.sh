@@ -11,6 +11,9 @@ name="openmineros-${board}-${model}-${version}"
 manifest="$dist_dir/${name}-manifest.json"
 artifact="$dist_dir/${name}-sd-card.img.xz"
 package_dir="$dist_dir/${name}-sd-test"
+key_work_dir="$dist_dir/${name}-sd-test-ssh"
+ssh_authorized_keys="${OPENMINEROS_SSH_AUTHORIZED_KEYS:-}"
+generated_ssh_key=false
 
 fail() {
   echo "prepare-sd-test: $*" >&2
@@ -24,7 +27,19 @@ esac
 
 cd "$repo_dir"
 
-"$script_dir/build-image.sh" "$board" "$model" "$version" "$dist_dir" sd >/dev/null
+if [ -z "$ssh_authorized_keys" ]; then
+  if ! command -v ssh-keygen >/dev/null 2>&1; then
+    fail "ssh-keygen is required to generate the first-boot SSH key; or set OPENMINEROS_SSH_AUTHORIZED_KEYS"
+  fi
+  rm -rf "$key_work_dir"
+  mkdir -p "$key_work_dir"
+  ssh-keygen -q -t ed25519 -N "" -C "openmineros-${board}-${model}-${version}-sd-test" -f "$key_work_dir/id_ed25519"
+  ssh_authorized_keys="$key_work_dir/id_ed25519.pub"
+  generated_ssh_key=true
+fi
+
+OPENMINEROS_SSH_AUTHORIZED_KEYS="$ssh_authorized_keys" \
+  "$script_dir/build-image.sh" "$board" "$model" "$version" "$dist_dir" sd >/dev/null
 "$script_dir/verify-sd-test-bundle.sh" "$board" "$model" "$version" "$dist_dir" >/dev/null
 
 rm -rf "$package_dir"
@@ -35,6 +50,21 @@ cp "$artifact" "$package_dir/"
 cp "$dist_dir/${name}-sha256sum.txt" "$package_dir/"
 cp "$script_dir/collect-s19-first-boot.sh" "$package_dir/"
 cp "$script_dir/extract-sd-test-rootfs.sh" "$package_dir/"
+
+if [ "$generated_ssh_key" = true ]; then
+  mkdir -p "$package_dir/ssh"
+  cp "$key_work_dir/id_ed25519" "$package_dir/ssh/"
+  cp "$key_work_dir/id_ed25519.pub" "$package_dir/ssh/"
+  chmod 0700 "$package_dir/ssh"
+  chmod 0600 "$package_dir/ssh/id_ed25519"
+  chmod 0644 "$package_dir/ssh/id_ed25519.pub"
+  rm -rf "$key_work_dir"
+  ssh_key_hint="$package_dir/ssh/id_ed25519"
+  ssh_key_note="- ssh/id_ed25519 and ssh/id_ed25519.pub"
+else
+  ssh_key_hint="<private-key-matching-OPENMINEROS_SSH_AUTHORIZED_KEYS>"
+  ssh_key_note="- use the private key matching your OPENMINEROS_SSH_AUTHORIZED_KEYS file"
+fi
 
 cat > "$package_dir/README.md" <<EOF_README
 # OpenMinerOS S19 Xilinx SD First-Boot Test Package
@@ -50,6 +80,7 @@ It is not a production flashable firmware image and must not be written to NAND.
 - ${name}-sha256sum.txt
 - collect-s19-first-boot.sh
 - extract-sd-test-rootfs.sh
+$ssh_key_note
 
 ## Local Verification
 
@@ -74,7 +105,7 @@ OPENMINEROS_ALLOW_SD_ROOTFS_EXTRACT=1 \\
 After the miner boots and gets an IP address:
 
 \`\`\`bash
-MINER_HOST=<miner-ip> MINER_USER=root \\
+MINER_HOST=<miner-ip> MINER_USER=root SSH_KEY="$ssh_key_hint" \\
   ./scripts/collect-s19-first-boot.sh
 \`\`\`
 
@@ -85,6 +116,7 @@ Required first-boot state:
 - nand_writes_allowed: false
 - asic_writes_allowed: false
 - flashing_allowed: false
+- ssh: dropbear on tcp/22 with key auth
 EOF_README
 
 echo "$package_dir"
