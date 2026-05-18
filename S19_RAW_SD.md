@@ -13,6 +13,26 @@ Expected boot asset examples:
 - one of `image.ub`, `uImage`, `zImage`, `Image`, or `fit.itb`
 - board device-tree files if your kernel format needs separate `.dtb` files
 
+## Import Boot Assets
+
+If you have a stock/recovery directory or archive, first import only the boot
+files:
+
+```bash
+make boot-assets-import \
+  BOOT_SOURCE=/path/to/stock-or-recovery-dir-or-archive \
+  BOOT_ASSETS=boot-assets/s19-xil
+```
+
+Supported input forms:
+
+- extracted directory,
+- `.zip`,
+- `.tar`, `.tar.gz`, `.tgz`, `.tar.xz`, `.txz`, `.tar.bz2`, `.tbz2`.
+
+For raw `.img` files, mount or extract the boot partition first and pass that
+mounted/extracted directory.
+
 ## Build Raw Candidate
 
 Run this on Linux or in a Linux VM/container because it needs `sfdisk`,
@@ -22,7 +42,7 @@ Run this on Linux or in a Linux VM/container because it needs `sfdisk`,
 make sd-raw-image \
   BOARD=s19-xil \
   MODEL=s19 \
-  BOOT_ASSETS=/path/to/s19-xil-boot-assets
+  BOOT_ASSETS=boot-assets/s19-xil
 ```
 
 Output:

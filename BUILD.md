@@ -29,6 +29,7 @@ make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
 make sd-test-package BOARD=s19-xil MODEL=s19j-pro
 make sd-test-verify BOARD=s19-xil MODEL=s19j-pro
+make boot-assets-import BOOT_SOURCE=/path/to/stock-recovery BOOT_ASSETS=boot-assets/s19-xil
 make sd-raw-image BOARD=s19-xil MODEL=s19 BOOT_ASSETS=/path/to/s19-xil-boot-assets
 cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
