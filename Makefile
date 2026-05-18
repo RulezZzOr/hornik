@@ -4,8 +4,11 @@ VERSION ?= 0.1.0
 DIST_DIR ?= dist
 MEDIA ?= all
 SD_MOUNT ?=
+BOOT_ASSETS ?=
+SD_RAW_IMAGE ?=
+SD_DISK ?=
 
-.PHONY: bootstrap fmt clippy test release size-budget artifact-budget run-control-plane image install-preflight verify-repro sd-test-package sd-test-verify sd-test-extract first-boot-collect clean
+.PHONY: bootstrap fmt clippy test release size-budget artifact-budget run-control-plane image install-preflight verify-repro sd-test-package sd-test-verify sd-test-extract sd-raw-image macos-list-sd macos-write-sd first-boot-collect clean
 
 bootstrap:
 	cargo fetch
@@ -48,6 +51,15 @@ sd-test-verify:
 
 sd-test-extract:
 	./scripts/extract-sd-test-rootfs.sh "$(DIST_DIR)/openmineros-$(BOARD)-$(MODEL)-$(VERSION)-sd-card.img.xz" "$(SD_MOUNT)"
+
+sd-raw-image:
+	./scripts/create-s19-xil-sd-raw.sh "$(BOARD)" "$(MODEL)" "$(VERSION)" "$(DIST_DIR)" "$(BOOT_ASSETS)"
+
+macos-list-sd:
+	./scripts/macos-list-sd-devices.sh
+
+macos-write-sd:
+	./scripts/macos-write-raw-sd.sh "$(SD_RAW_IMAGE)" "$(SD_DISK)"
 
 first-boot-collect:
 	./scripts/collect-s19-first-boot.sh

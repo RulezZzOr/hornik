@@ -56,6 +56,7 @@ make image BOARD=s19-aml MODEL=s19j-pro
 make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
 make sd-test-package BOARD=s19-xil MODEL=s19j-pro
+make sd-raw-image BOARD=s19-xil MODEL=s19 BOOT_ASSETS=/path/to/s19-xil-boot-assets
 cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```
@@ -68,6 +69,9 @@ safe boot hooks.
 `make sd-test-package` prepares the guarded first-boot SD package with DHCP on
 `eth0`, Dropbear SSH on port `22`, generated key-based root access, and local
 self-test scripts for collecting the first hardware report.
+For a blank SD card, `make sd-raw-image` can assemble a raw SD candidate only
+when you provide known-good S19 XIL bootloader/kernel assets. See
+`S19_RAW_SD.md`.
 
 For `s19-xil`, the default `MEDIA=all` build emits both:
 

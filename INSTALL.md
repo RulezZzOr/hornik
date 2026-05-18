@@ -121,3 +121,7 @@ MINER_HOST=<miner-ip> \
 
 See `S19_SD_TEST.md` for the full operator checklist. The SD artifact is a
 compressed rootfs tar model, not a raw `dd` image.
+
+For a blank SD card, use the raw-image path in `S19_RAW_SD.md`. It requires
+known-good S19 XIL boot assets supplied by the operator; this repository does
+not ship vendor bootloader or kernel files.

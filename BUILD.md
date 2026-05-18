@@ -29,6 +29,7 @@ make install-preflight BOARD=s19-xil MODEL=s19j-pro
 make verify-repro BOARD=s19-xil MODEL=s19j-pro
 make sd-test-package BOARD=s19-xil MODEL=s19j-pro
 make sd-test-verify BOARD=s19-xil MODEL=s19j-pro
+make sd-raw-image BOARD=s19-xil MODEL=s19 BOOT_ASSETS=/path/to/s19-xil-boot-assets
 cargo run -p openmineros-commander -- verify-manifest \
   --manifest dist/openmineros-s19-xil-s19j-pro-0.1.0-manifest.json
 ```
@@ -37,6 +38,9 @@ cargo run -p openmineros-commander -- verify-manifest \
 public key into the SD rootfs for first-boot collection. Set
 `OPENMINEROS_SSH_AUTHORIZED_KEYS=/path/to/id_ed25519.pub` to use an existing
 public key instead.
+
+`make sd-raw-image` requires caller-provided S19 XIL bootloader/kernel assets.
+See `S19_RAW_SD.md`; the repo does not ship vendor boot files.
 
 ## Supported Board Values
 
