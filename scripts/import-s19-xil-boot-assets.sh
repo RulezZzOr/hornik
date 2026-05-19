@@ -77,6 +77,149 @@ case "$source_path" in
     tar -xf "$source_path" -C "$tmp_dir/extract"
     search_root="$tmp_dir/extract"
     ;;
+  *.bmu)
+    command -v python3 >/dev/null 2>&1 || fail "python3 is required to extract .bmu boot assets"
+    mkdir -p "$tmp_dir/extract"
+    python3 - "$source_path" "$tmp_dir/extract" <<'PY'
+import gzip
+import json
+import struct
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_bytes()
+out_dir = Path(sys.argv[2])
+
+UIMAGE_MAGIC = b"\x27\x05\x19\x56"
+FDT_MAGIC = b"\xd0\x0d\xfe\xed"
+
+def write(path, data):
+    path.write_bytes(data)
+
+uimages = []
+offset = 0
+while True:
+    found = source.find(UIMAGE_MAGIC, offset)
+    if found < 0 or found + 64 > len(source):
+        break
+    size = struct.unpack(">I", source[found + 12 : found + 16])[0]
+    end = found + 64 + size
+    if end > len(source):
+        offset = found + 4
+        continue
+    header = source[found : found + 64]
+    payload = source[found + 64 : end]
+    name = header[32:64].split(b"\0", 1)[0].decode("ascii", "ignore")
+    uimages.append(
+        {
+            "offset": found,
+            "size": size,
+            "end": end,
+            "name": name,
+            "type": header[30],
+            "payload": payload,
+            "blob": source[found:end],
+        }
+    )
+    offset = found + 4
+
+if not uimages:
+    raise SystemExit("no uImage blobs found in .bmu")
+
+kernel_candidates = [item for item in uimages if item["type"] == 2]
+ramdisk_candidates = [item for item in uimages if item["type"] == 3]
+
+if not kernel_candidates:
+    raise SystemExit("no kernel uImage candidate found in .bmu")
+if not ramdisk_candidates:
+    raise SystemExit("no ramdisk uImage candidate found in .bmu")
+
+def pick_best_kernel(items):
+    return sorted(
+        items,
+        key=lambda item: (
+            1 if "Linux" in item["name"] else 0,
+            item["size"],
+            -item["offset"],
+        ),
+        reverse=True,
+    )[0]
+
+def pick_best_ramdisk(items):
+    return sorted(
+        items,
+        key=lambda item: (
+            item["size"],
+            1 if "ramdisk" in item["name"].lower() else 0,
+            -item["offset"],
+        ),
+        reverse=True,
+    )[0]
+
+def dtb_score(blob):
+    text = blob.decode("latin1", "ignore")
+    score = 0
+    for token in ("xlnx,zynq", "has-power", "has-modem", "has-wp", "has-ecc"):
+        if token in text:
+            score += 10
+    if "microzed" in text:
+        score -= 30
+    if "zynq-7000" in text:
+        score += 5
+    return score
+
+dtb_candidates = []
+offset = 0
+while True:
+    found = source.find(FDT_MAGIC, offset)
+    if found < 0 or found + 8 > len(source):
+        break
+    size = struct.unpack(">I", source[found + 4 : found + 8])[0]
+    end = found + size
+    if end > len(source):
+        offset = found + 4
+        continue
+    blob = source[found:end]
+    dtb_candidates.append(
+        {
+            "offset": found,
+            "size": size,
+            "end": end,
+            "blob": blob,
+            "score": dtb_score(blob),
+        }
+    )
+    offset = found + 4
+
+if not dtb_candidates:
+    raise SystemExit("no devicetree blob candidate found in .bmu")
+
+kernel = pick_best_kernel(kernel_candidates)
+ramdisk = pick_best_ramdisk(ramdisk_candidates)
+dtb = sorted(dtb_candidates, key=lambda item: (item["score"], item["size"], -item["offset"]), reverse=True)[0]
+
+write(out_dir / "uImage", kernel["blob"])
+write(out_dir / "update.image.gz", ramdisk["blob"])
+write(out_dir / "vendor-ramdisk.ext2", gzip.decompress(ramdisk["payload"]))
+write(out_dir / "devicetree.dtb", dtb["blob"])
+
+(out_dir / "bmu-assets.json").write_text(
+    json.dumps(
+        {
+            "schema_version": 1,
+            "source": str(Path(sys.argv[1])),
+            "kernel_offset": kernel["offset"],
+            "ramdisk_offset": ramdisk["offset"],
+            "devicetree_offset": dtb["offset"],
+            "vendor_ramdisk_bytes": len(gzip.decompress(ramdisk["payload"])),
+        },
+        indent=2,
+    )
+    + "\n"
+)
+PY
+    search_root="$tmp_dir/extract"
+    ;;
   *.img|*.img.xz|*.dmg)
     fail "mount raw images first, then pass the mounted boot partition or extracted directory"
     ;;
@@ -92,12 +235,16 @@ esac
 rm -rf "$output_dir"
 mkdir -p "$output_dir"
 
-bootloader="$(copy_first_named "$search_root" "$output_dir" BOOT.BIN boot.bin || true)"
-kernel="$(copy_first_named "$search_root" "$output_dir" image.ub uImage zImage Image fit.itb || true)"
-copy_optional_matches "$search_root" "$output_dir" '*.dtb' '*.dtbo' 'uEnv.txt' 'boot.scr' 'extlinux.conf' '*.bit'
+bootloader="$(copy_first_named "$search_root" "$output_dir" BOOT.BIN boot.bin uImage image.ub || true)"
+kernel="$(copy_first_named "$search_root" "$output_dir" uImage image.ub zImage Image fit.itb || true)"
+ramdisk="$(copy_first_named "$search_root" "$output_dir" update.image.gz || true)"
+copy_optional_matches "$search_root" "$output_dir" '*.dtb' '*.dtbo' 'uEnv.txt' 'boot.scr' 'extlinux.conf' '*.bit' 'vendor-ramdisk.ext2' 'bmu-assets.json'
+
+[ -n "$bootloader" ] || bootloader="$kernel"
 
 [ -n "$bootloader" ] || fail "missing non-empty BOOT.BIN or boot.bin in source"
 [ -n "$kernel" ] || fail "missing non-empty kernel image: image.ub, uImage, zImage, Image, or fit.itb"
+[ -n "$ramdisk" ] || fail "missing non-empty update.image.gz in source"
 
 manifest="$output_dir/boot-assets.json"
 {
@@ -107,6 +254,7 @@ manifest="$output_dir/boot-assets.json"
   echo "  \"source\": \"$source_path\","
   echo "  \"bootloader\": \"$(basename "$bootloader")\","
   echo "  \"kernel\": \"$(basename "$kernel")\","
+  echo "  \"ramdisk\": \"$(basename "$ramdisk")\","
   echo "  \"files\": ["
   first=1
   find "$output_dir" -type f ! -name 'boot-assets.json' -print | LC_ALL=C sort | while IFS= read -r file; do

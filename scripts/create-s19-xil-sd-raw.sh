@@ -22,18 +22,117 @@ fail() {
   exit 1
 }
 
-require_tool() {
-  command -v "$1" >/dev/null 2>&1 || fail "missing required tool: $1"
-}
-
-require_one_tool() {
+resolve_tool() {
   for tool in "$@"; do
     if command -v "$tool" >/dev/null 2>&1; then
-      printf '%s\n' "$tool"
+      command -v "$tool"
       return 0
     fi
   done
-  fail "missing required tool, need one of: $*"
+
+  if command -v brew >/dev/null 2>&1; then
+    for tool in "$@"; do
+      case "$tool" in
+        mkfs.ext4|mke2fs)
+          prefix="$(brew --prefix e2fsprogs 2>/dev/null || true)"
+          [ -n "$prefix" ] && [ -x "$prefix/sbin/$tool" ] && {
+            printf '%s\n' "$prefix/sbin/$tool"
+            return 0
+          }
+          ;;
+        mkfs.vfat|mkfs.fat)
+          prefix="$(brew --prefix dosfstools 2>/dev/null || true)"
+          [ -n "$prefix" ] && [ -x "$prefix/sbin/$tool" ] && {
+            printf '%s\n' "$prefix/sbin/$tool"
+            return 0
+          }
+          ;;
+        mcopy|mmd|mdir|mdelete|mlabel|mmove|mren|mtype|mread|mwrite)
+          prefix="$(brew --prefix mtools 2>/dev/null || true)"
+          [ -n "$prefix" ] && [ -x "$prefix/bin/$tool" ] && {
+            printf '%s\n' "$prefix/bin/$tool"
+            return 0
+          }
+          ;;
+      esac
+    done
+  fi
+
+  return 1
+}
+
+require_tool() {
+  tool_path="$(resolve_tool "$@")" || fail "missing required tool, need one of: $*"
+  printf '%s\n' "$tool_path"
+}
+
+find_nonempty_by_name() {
+  root="$1"
+  name="$2"
+  find "$root" -type f -name "$name" -print 2>/dev/null | while IFS= read -r candidate; do
+    if [ -s "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      break
+    fi
+  done
+}
+
+copy_first_named_as() {
+  root="$1"
+  destination="$2"
+  target_name="$3"
+  shift 3
+  for name in "$@"; do
+    found="$(find_nonempty_by_name "$root" "$name" | sed -n '1p')"
+    if [ -n "$found" ]; then
+      cp "$found" "$destination/$target_name"
+      printf '%s\n' "$destination/$target_name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+copy_optional_named() {
+  root="$1"
+  destination="$2"
+  shift 2
+  for name in "$@"; do
+    found="$(find_nonempty_by_name "$root" "$name" | sed -n '1p')"
+    [ -n "$found" ] || continue
+    cp "$found" "$destination/$(basename "$found")"
+  done
+}
+
+write_mbr() {
+  image="$1"
+  boot_start="$2"
+  boot_sectors="$3"
+  root_start="$4"
+  root_sectors="$5"
+  python3 - "$image" "$boot_start" "$boot_sectors" "$root_start" "$root_sectors" <<'PY'
+import struct
+import sys
+from pathlib import Path
+
+image = Path(sys.argv[1])
+boot_start = int(sys.argv[2])
+boot_sectors = int(sys.argv[3])
+root_start = int(sys.argv[4])
+root_sectors = int(sys.argv[5])
+
+def entry(bootable, part_type, start, size):
+    return struct.pack("<B3sB3sII", bootable, b"\x00\x00\x00", part_type, b"\x00\x00\x00", start, size)
+
+mbr = bytearray(512)
+mbr[446:462] = entry(0x80, 0x0C, boot_start, boot_sectors)
+mbr[462:478] = entry(0x00, 0x83, root_start, root_sectors)
+mbr[510:512] = b"\x55\xAA"
+
+with image.open("r+b") as fh:
+    fh.seek(0)
+    fh.write(mbr)
+PY
 }
 
 case "$board" in
@@ -44,42 +143,9 @@ esac
 [ -n "$boot_assets" ] || fail "BOOT_ASSETS=/path/to/s19-xil-boot-files is required"
 [ -d "$boot_assets" ] || fail "boot assets directory does not exist: $boot_assets"
 
-case "$(uname -s)" in
-  Linux) ;;
-  *)
-    fail "raw SD composition requires Linux tools. On macOS, run this inside a Linux VM/container, then write the produced .img.xz from macOS."
-    ;;
-esac
-
 if [ "$image_mib" -le "$boot_mib" ]; then
   fail "OPENMINEROS_SD_IMAGE_MIB must be larger than OPENMINEROS_SD_BOOT_MIB"
 fi
-
-has_bootloader=false
-has_kernel=false
-if [ -f "$boot_assets/BOOT.BIN" ] || [ -f "$boot_assets/boot.bin" ]; then
-  has_bootloader=true
-fi
-for kernel in image.ub uImage zImage Image fit.itb; do
-  if [ -f "$boot_assets/$kernel" ]; then
-    has_kernel=true
-  fi
-done
-
-if [ "$has_bootloader" != true ] || [ "$has_kernel" != true ]; then
-  if [ "${OPENMINEROS_ALLOW_INCOMPLETE_BOOT_ASSETS:-0}" != "1" ]; then
-    fail "boot assets must contain BOOT.BIN/boot.bin and one kernel image: image.ub, uImage, zImage, Image, or fit.itb"
-  fi
-fi
-
-require_tool sfdisk
-require_tool dd
-require_tool truncate
-require_tool tar
-require_tool xz
-require_tool mcopy
-mkfs_fat="$(require_one_tool mkfs.vfat mkfs.fat)"
-mkfs_ext4="$(require_one_tool mkfs.ext4 mke2fs)"
 
 cd "$repo_dir"
 "$script_dir/prepare-sd-test.sh" "$board" "$model" "$version" "$dist_dir" >/dev/null
@@ -90,18 +156,20 @@ trap 'rm -rf "$tmp_dir"' EXIT INT TERM
 rootfs_dir="$tmp_dir/rootfs"
 boot_img="$tmp_dir/boot.vfat"
 root_img="$tmp_dir/root.ext4"
-mkdir -p "$rootfs_dir"
+boot_stage="$tmp_dir/boot-stage"
+patched_update_image="$tmp_dir/update.image.gz"
+mkdir -p "$rootfs_dir" "$boot_stage"
 
 xz -dc "$rootfs_artifact" | (
   cd "$rootfs_dir"
   tar -xpf -
 )
 
-image_sectors=$((image_mib * 2048))
 boot_start=2048
 boot_sectors=$((boot_mib * 2048))
 root_start=$((boot_start + boot_sectors))
 root_guard_sectors=2048
+image_sectors=$((image_mib * 2048))
 root_sectors=$((image_sectors - root_start - root_guard_sectors))
 
 if [ "$root_sectors" -le 0 ]; then
@@ -112,10 +180,44 @@ boot_bytes=$((boot_sectors * 512))
 root_bytes=$((root_sectors * 512))
 image_bytes=$((image_sectors * 512))
 
+kernel_source="$(copy_first_named_as "$boot_assets" "$boot_stage" uImage uImage image.ub || true)"
+dtb_source="$(copy_first_named_as "$boot_assets" "$boot_stage" devicetree.dtb devicetree.dtb '*.dtb' || true)"
+
+if [ -z "$kernel_source" ] || [ -z "$dtb_source" ]; then
+  if [ "${OPENMINEROS_ALLOW_INCOMPLETE_BOOT_ASSETS:-0}" != "1" ]; then
+    fail "boot assets must provide a bootable kernel (uImage/image.ub) and devicetree.dtb"
+  fi
+fi
+
+if [ -f "$boot_assets/vendor-ramdisk.ext2" ]; then
+  patched_update_image="$tmp_dir/update.image.gz"
+  "$script_dir/patch-s19-xil-vendor-ramdisk.sh" \
+    "$boot_assets/vendor-ramdisk.ext2" \
+    "$rootfs_dir" \
+    "$patched_update_image" >/dev/null
+  cp "$patched_update_image" "$boot_stage/update.image.gz"
+elif [ -f "$boot_assets/update.image.gz" ]; then
+  cp "$boot_assets/update.image.gz" "$boot_stage/update.image.gz"
+else
+  if [ "${OPENMINEROS_ALLOW_INCOMPLETE_BOOT_ASSETS:-0}" != "1" ]; then
+    fail "boot assets must include vendor-ramdisk.ext2 or update.image.gz"
+  fi
+fi
+
+copy_optional_named "$boot_assets" "$boot_stage" uEnv.txt boot.scr system.bit.bin BOOT.BIN boot.bin
+
+if [ ! -f "$boot_stage/update.image.gz" ]; then
+  fail "boot stage missing update.image.gz after asset selection"
+fi
+
+mkfs_fat="$(require_tool mkfs.vfat mkfs.fat)"
+mkfs_ext4="$(require_tool mkfs.ext4 mke2fs)"
+mcopy_tool="$(require_tool mcopy)"
+
 rm -f "$raw_img" "$raw_xz" "$metadata"
 truncate -s "$boot_bytes" "$boot_img"
 "$mkfs_fat" -n OMO_BOOT "$boot_img" >/dev/null
-mcopy -i "$boot_img" -sp "$boot_assets"/* ::/
+"$mcopy_tool" -i "$boot_img" -sp "$boot_stage"/* ::/
 
 truncate -s "$root_bytes" "$root_img"
 if [ "$(basename "$mkfs_ext4")" = "mke2fs" ]; then
@@ -125,13 +227,7 @@ else
 fi
 
 truncate -s "$image_bytes" "$raw_img"
-sfdisk "$raw_img" >/dev/null <<EOF_SFDISK
-label: dos
-unit: sectors
-
-start=$boot_start, size=$boot_sectors, type=c, bootable
-start=$root_start, size=$root_sectors, type=83
-EOF_SFDISK
+write_mbr "$raw_img" "$boot_start" "$boot_sectors" "$root_start" "$root_sectors"
 
 dd if="$boot_img" of="$raw_img" bs=512 seek="$boot_start" conv=notrunc status=none
 dd if="$root_img" of="$raw_img" bs=512 seek="$root_start" conv=notrunc status=none
@@ -155,6 +251,8 @@ cat > "$metadata" <<EOF_METADATA
   "boot_partition_mib": $boot_mib,
   "root_partition_mib": $((root_sectors / 2048)),
   "boot_assets_source": "$boot_assets",
+  "boot_chain": "sdboot -> uImage + devicetree.dtb + update.image.gz",
+  "vendor_ramdisk_patched": $( [ -f "$boot_assets/vendor-ramdisk.ext2" ] && echo true || echo false ),
   "first_boot_safe": true,
   "nand_writes_allowed": false,
   "asic_writes_allowed": false,
@@ -166,6 +264,7 @@ cat > "$metadata" <<EOF_METADATA
   },
   "notes": [
     "candidate image assembled from caller-provided S19 XIL boot assets",
+    "vendor ramdisk is patched with the OpenMinerOS overlay when vendor-ramdisk.ext2 is available",
     "verify on one sacrificial SD boot before any NAND or ASIC write path"
   ]
 }
