@@ -356,13 +356,25 @@ pub fn classify_stratum_message(
             })
         }
         _ if method.is_none() && object.contains_key("result") => {
+            let kind = classify_result(id.as_ref(), object.get("result"));
+            let result_success = match kind {
+                StratumMessageKind::SubscribeResult => match object.get("result") {
+                    Some(Value::Bool(value)) => Some(*value),
+                    Some(Value::Null) | None => Some(false),
+                    Some(_) => Some(true),
+                },
+                StratumMessageKind::AuthorizeResult | StratumMessageKind::SubmitResult => {
+                    object.get("result").and_then(Value::as_bool)
+                }
+                _ => None,
+            };
             Ok(StratumMessageClassification {
-                kind: classify_result(id.as_ref(), object.get("result")),
+                kind,
                 id,
                 method,
                 notify: None,
                 difficulty: None,
-                result_success: object.get("result").and_then(Value::as_bool),
+                result_success,
             })
         }
         _ => Ok(StratumMessageClassification {
@@ -491,6 +503,21 @@ mod tests {
         assert_eq!(status.pending_jobs, 0);
         assert!(!status.submit_policy.enabled_in_build);
         assert!(status.submit_policy.local_precheck_required);
+    }
+
+    #[test]
+    fn classifies_subscribe_response_as_success_when_result_is_array() {
+        let classified = classify_stratum_message(
+            r#"{
+                "id": 1,
+                "result": [true, "extranonce1", 4],
+                "error": null
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(classified.kind, StratumMessageKind::SubscribeResult);
+        assert_eq!(classified.result_success, Some(true));
     }
 
     #[test]

@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum HardwareReadinessState {
     SimulationReady,
     ReadOnlyIdentified,
+    MiningReady,
     ReadOnlyNeedsIdentity,
     Blocked,
 }
@@ -104,7 +105,7 @@ fn readiness_state(
         }
         (RuntimeBackendMode::HardwareProbe, _, _) => HardwareReadinessState::ReadOnlyNeedsIdentity,
         (RuntimeBackendMode::HardwareMining, HardwareSafetyState::HardwareMiningEnabled, true) => {
-            HardwareReadinessState::ReadOnlyIdentified
+            HardwareReadinessState::MiningReady
         }
         (RuntimeBackendMode::HardwareMining, _, _) => HardwareReadinessState::ReadOnlyNeedsIdentity,
     }
@@ -123,6 +124,9 @@ fn readiness_notes(
         }
         HardwareReadinessState::ReadOnlyIdentified => {
             "configured target was identified through read-only evidence".to_string()
+        }
+        HardwareReadinessState::MiningReady => {
+            "configured target is identified and ready for live hardware mining".to_string()
         }
         HardwareReadinessState::ReadOnlyNeedsIdentity => {
             "read-only hardware identity must be confirmed before future hardware actions"
@@ -152,7 +156,10 @@ fn action(action: &str, allowed: bool, reason: &str) -> HardwareActionReadiness 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BoardFamily, Capability, HardwareIdentityReport, evaluate_hardware_safety};
+    use crate::{
+        BoardFamily, Capability, HardwareIdentityConfidence, HardwareIdentityReport,
+        HardwareIdentityState, evaluate_hardware_safety,
+    };
 
     fn profile(family: BoardFamily) -> BoardProfile {
         BoardProfile {
@@ -161,6 +168,22 @@ mod tests {
             recovery: "test recovery",
             capabilities: CapabilitySet::from_flags([Capability::SafeMode]),
         }
+    }
+
+    fn identity(
+        backend: RuntimeBackendMode,
+        state: HardwareIdentityState,
+        confidence: HardwareIdentityConfidence,
+        detected_board: Option<BoardFamily>,
+        detected_model: Option<Model>,
+    ) -> HardwareIdentityReport {
+        let mut identity = HardwareIdentityReport::simulated(BoardFamily::Xilinx, Model::S19jPro);
+        identity.backend = backend;
+        identity.state = state;
+        identity.confidence = confidence;
+        identity.detected_board = detected_board;
+        identity.detected_model = detected_model;
+        identity
     }
 
     #[test]
@@ -192,6 +215,106 @@ mod tests {
                 .iter()
                 .any(|action| action.action == "hardware_mining" && !action.allowed)
         );
+    }
+
+    #[test]
+    fn hardware_probe_identified_is_read_only_identified() {
+        let identity = identity(
+            RuntimeBackendMode::HardwareProbe,
+            HardwareIdentityState::Inferred,
+            HardwareIdentityConfidence::High,
+            Some(BoardFamily::Xilinx),
+            Some(Model::S19jPro),
+        );
+        let safety = evaluate_hardware_safety(
+            RuntimeBackendMode::HardwareProbe,
+            SupportLevel::MvpStable,
+            &identity,
+        );
+        let report = evaluate_hardware_readiness(
+            RuntimeBackendMode::HardwareProbe,
+            Model::S19jPro,
+            &profile(BoardFamily::Xilinx),
+            SupportLevel::MvpStable,
+            &safety,
+        );
+
+        assert_eq!(report.state, HardwareReadinessState::ReadOnlyIdentified);
+    }
+
+    #[test]
+    fn hardware_probe_needs_identity_stays_read_only_needs_identity() {
+        let identity = identity(
+            RuntimeBackendMode::HardwareProbe,
+            HardwareIdentityState::ConfiguredOnly,
+            HardwareIdentityConfidence::Low,
+            None,
+            None,
+        );
+        let safety = evaluate_hardware_safety(
+            RuntimeBackendMode::HardwareProbe,
+            SupportLevel::MvpStable,
+            &identity,
+        );
+        let report = evaluate_hardware_readiness(
+            RuntimeBackendMode::HardwareProbe,
+            Model::S19jPro,
+            &profile(BoardFamily::Xilinx),
+            SupportLevel::MvpStable,
+            &safety,
+        );
+
+        assert_eq!(report.state, HardwareReadinessState::ReadOnlyNeedsIdentity);
+    }
+
+    #[test]
+    fn hardware_mining_ready_is_distinct_from_read_only_identified() {
+        let identity = identity(
+            RuntimeBackendMode::HardwareMining,
+            HardwareIdentityState::Inferred,
+            HardwareIdentityConfidence::High,
+            Some(BoardFamily::Xilinx),
+            Some(Model::S19jPro),
+        );
+        let safety = evaluate_hardware_safety(
+            RuntimeBackendMode::HardwareMining,
+            SupportLevel::MvpStable,
+            &identity,
+        );
+        let report = evaluate_hardware_readiness(
+            RuntimeBackendMode::HardwareMining,
+            Model::S19jPro,
+            &profile(BoardFamily::Xilinx),
+            SupportLevel::MvpStable,
+            &safety,
+        );
+
+        assert_eq!(report.state, HardwareReadinessState::MiningReady);
+    }
+
+    #[test]
+    fn hardware_mining_needs_identity_stays_read_only_needs_identity() {
+        let identity = identity(
+            RuntimeBackendMode::HardwareMining,
+            HardwareIdentityState::ConfiguredOnly,
+            HardwareIdentityConfidence::Low,
+            None,
+            None,
+        );
+        let safety = evaluate_hardware_safety(
+            RuntimeBackendMode::HardwareMining,
+            SupportLevel::MvpStable,
+            &identity,
+        );
+        let report = evaluate_hardware_readiness(
+            RuntimeBackendMode::HardwareMining,
+            Model::S19jPro,
+            &profile(BoardFamily::Xilinx),
+            SupportLevel::MvpStable,
+            &safety,
+        );
+
+        assert_eq!(report.state, HardwareReadinessState::ReadOnlyNeedsIdentity);
     }
 
     #[test]

@@ -89,6 +89,25 @@ mkdir -p "$rootfs_base/usr/bin"
 cp "$runtime_binary_source" "$rootfs_base/usr/bin/openmineros-control-plane"
 chmod 0755 "$rootfs_base/usr/bin/openmineros-control-plane"
 
+runtime_env_path="$rootfs_base/etc/openmineros/runtime.env"
+if [ ! -f "$runtime_env_path" ]; then
+  echo "missing runtime.env template in overlay: $runtime_env_path" >&2
+  exit 1
+fi
+
+escape_sed_replacement() {
+  printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
+}
+
+board_escaped="$(escape_sed_replacement "$board")"
+model_escaped="$(escape_sed_replacement "$model")"
+runtime_env_rendered="$rootfs_base/etc/openmineros/.runtime.env.rendered.$$"
+sed \
+  -e "s|\${BOARD}|$board_escaped|g" \
+  -e "s|\${MODEL}|$model_escaped|g" \
+  "$runtime_env_path" > "$runtime_env_rendered"
+mv "$runtime_env_rendered" "$runtime_env_path"
+
 if [ -n "$ssh_authorized_keys" ]; then
   if [ ! -f "$ssh_authorized_keys" ]; then
     echo "OPENMINEROS_SSH_AUTHORIZED_KEYS points to a missing file: $ssh_authorized_keys" >&2

@@ -56,7 +56,7 @@ collect_command() {
 collect_api() {
   name="$1"
   path="$2"
-  collect_command "$name" "if command -v curl >/dev/null 2>&1; then curl -fsS 'http://127.0.0.1:8080$path'; elif command -v wget >/dev/null 2>&1; then wget -qO- 'http://127.0.0.1:8080$path'; else echo 'curl/wget missing' >&2; exit 127; fi"
+  collect_command "$name" "if command -v curl >/dev/null 2>&1; then if ! curl -fsS 'http://127.0.0.1:8080$path'; then echo 'failed to fetch $path from control plane' >&2; exit 1; fi; elif command -v wget >/dev/null 2>&1; then if ! wget -qO- 'http://127.0.0.1:8080$path'; then echo 'failed to fetch $path from control plane via wget' >&2; exit 1; fi; else echo 'curl/wget missing' >&2; exit 127; fi"
 }
 
 require_json_bool() {
@@ -79,7 +79,7 @@ echo "generated_utc=$stamp" >> "$out_dir/metadata.txt"
 : > "$out_dir/verdict.txt"
 
 collect_api "api-system-info.json" "/api/v1/system/info"
-collect_api "api-health.json" "/api/v1/health"
+collect_api "api-health.json" "/api/v1/system/health"
 collect_api "api-runtime-control.json" "/api/v1/runtime/control"
 collect_api "api-hardware-identity.json" "/api/v1/hardware/identity"
 collect_api "api-hardware-readiness.json" "/api/v1/hardware/readiness"

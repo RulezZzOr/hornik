@@ -314,26 +314,11 @@ impl Supervisor {
     }
 
     pub fn pool_runtime(&self) -> PoolRuntimeSummary {
-        let mut runtime = summarize_pool_runtime(&self.pools, self.pool_policy);
-        let safety = self.hardware_safety_gate();
-        let control = self.control_state();
-        let mut engine = self
-            .stratum_engine
+        self.stratum_engine
             .lock()
-            .expect("stratum engine mutex poisoned");
-        engine.poll(
-            self.backend.mode() == RuntimeBackendMode::HardwareMining,
-            safety.hardware_mining_allowed && !control.board_paused,
-        );
-        runtime.active_priority = engine.status.active_pool_priority;
-        runtime.reconnects_total = engine.reconnects_total;
-        runtime.reconnect_suppressed_total = engine.reconnect_suppressed_total;
-        runtime.stale_jobs_total = engine.stale_jobs_total;
-        runtime.active_latency_ms = engine.last_connect_latency_ms;
-        if engine.status.socket_open {
-            runtime.state = PoolRuntimeState::LiveConnection;
-        }
-        runtime
+            .expect("stratum engine mutex poisoned")
+            .snapshot()
+            .pool_runtime
     }
 
     pub fn pool_strategy(&self) -> PoolStrategyResponse {
@@ -345,17 +330,13 @@ impl Supervisor {
     }
 
     pub fn stratum_status(&self) -> StratumEngineStatus {
-        let safety = self.hardware_safety_gate();
         let control = self.control_state();
-        let mut engine = self
+        let mut status = self
             .stratum_engine
             .lock()
-            .expect("stratum engine mutex poisoned");
-        engine.poll(
-            self.backend.mode() == RuntimeBackendMode::HardwareMining,
-            safety.hardware_mining_allowed && !control.board_paused,
-        );
-        let mut status = engine.status.clone();
+            .expect("stratum engine mutex poisoned")
+            .snapshot()
+            .status;
         if control.board_paused {
             status.notes.push(
                 "board is paused by operator; live socket may remain open but ASIC dispatch is suspended"
@@ -581,14 +562,19 @@ impl Supervisor {
                 key: "target_readiness".to_string(),
                 title: "Target readiness".to_string(),
                 state: match readiness.state {
-                    HardwareReadinessState::ReadOnlyIdentified => FirmwareGapState::Ready,
-                    HardwareReadinessState::SimulationReady
+                    HardwareReadinessState::MiningReady => FirmwareGapState::Ready,
+                    HardwareReadinessState::ReadOnlyIdentified
+                    | HardwareReadinessState::SimulationReady
                     | HardwareReadinessState::ReadOnlyNeedsIdentity => FirmwareGapState::Partial,
                     HardwareReadinessState::Blocked => FirmwareGapState::Missing,
                 },
                 detail: match readiness.state {
+                    HardwareReadinessState::MiningReady => {
+                        "The configured S19 target is identified and the hardware-mining backend is ready for live dispatch."
+                            .to_string()
+                    }
                     HardwareReadinessState::ReadOnlyIdentified => {
-                        "The configured S19 target is identified and the safety gate is aligned with the board profile."
+                        "The configured S19 target is identified through read-only evidence, but live mining is not yet armed."
                             .to_string()
                     }
                     HardwareReadinessState::SimulationReady => {
@@ -1519,6 +1505,12 @@ struct StratumEngine {
     last_connect_latency_ms: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+struct StratumEngineSnapshot {
+    status: StratumEngineStatus,
+    pool_runtime: PoolRuntimeSummary,
+}
+
 impl std::fmt::Debug for StratumEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StratumEngine")
@@ -1620,6 +1612,26 @@ impl StratumEngine {
         self.submit_asic_share_candidates();
         self.update_live_state();
         self.status.submit_policy.enabled_in_build = socket_enabled;
+    }
+
+    fn snapshot(&self) -> StratumEngineSnapshot {
+        let mut status = self.status.clone();
+        status.active_pool_priority = self.active_pool.as_ref().map(|pool| pool.priority);
+
+        let mut pool_runtime = summarize_pool_runtime(&self.pools, self.policy);
+        pool_runtime.active_priority = status.active_pool_priority;
+        pool_runtime.active_latency_ms = self.last_connect_latency_ms;
+        pool_runtime.reconnects_total = self.reconnects_total;
+        pool_runtime.reconnect_suppressed_total = self.reconnect_suppressed_total;
+        pool_runtime.stale_jobs_total = self.stale_jobs_total;
+        if status.socket_open {
+            pool_runtime.state = PoolRuntimeState::LiveConnection;
+        }
+
+        StratumEngineSnapshot {
+            status,
+            pool_runtime,
+        }
     }
 
     fn submit_share(&mut self, candidate: StratumShareCandidate) -> SharePrecheckResult {
@@ -1794,7 +1806,7 @@ impl StratumEngine {
                 self.status.current_difficulty = classified.difficulty;
             }
             StratumMessageKind::SubscribeResult => {
-                self.status.subscribed = true;
+                self.status.subscribed = classified.result_success.unwrap_or(false);
             }
             StratumMessageKind::AuthorizeResult => {
                 self.status.authorized = classified.result_success.unwrap_or(false);
@@ -1998,6 +2010,7 @@ fn hardware_readiness_state_label(state: HardwareReadinessState) -> &'static str
     match state {
         HardwareReadinessState::SimulationReady => "simulation_ready",
         HardwareReadinessState::ReadOnlyIdentified => "read_only_identified",
+        HardwareReadinessState::MiningReady => "mining_ready",
         HardwareReadinessState::ReadOnlyNeedsIdentity => "read_only_needs_identity",
         HardwareReadinessState::Blocked => "blocked",
     }
@@ -2215,6 +2228,32 @@ mod tests {
     }
 
     #[test]
+    fn rejected_subscribe_response_does_not_mark_session_subscribed() {
+        let dispatcher = Arc::new(MockDispatcher::default());
+        let mut engine = StratumEngine::new(
+            Vec::new(),
+            JobPipelinePolicy::from(PoolConnectionPolicy::default()),
+            PoolConnectionPolicy::default(),
+            RuntimeBackendMode::HardwareMining,
+            Some(0),
+            dispatcher,
+        );
+        let classified = classify_stratum_message(
+            r#"{
+                "id": 1,
+                "result": false,
+                "error": "subscribe rejected"
+            }"#,
+        )
+        .unwrap();
+
+        engine.handle_message(classified);
+
+        assert!(!engine.status.subscribed);
+        assert!(!engine.status.authorized);
+    }
+
+    #[test]
     fn hardware_mining_poll_connects_to_mock_stratum_and_reaches_live_state() {
         let dispatcher = Arc::new(MockDispatcher::default());
         let pool_url = spawn_mock_stratum_server();
@@ -2246,6 +2285,40 @@ mod tests {
             dispatcher.dispatched_jobs.lock().unwrap().as_slice(),
             ["job-7"]
         );
+    }
+
+    #[test]
+    fn dashboard_overview_and_metrics_do_not_poll_stratum_engine() {
+        let config = RuntimeConfig::from_toml_str(
+            r#"
+            [[pools]]
+            priority = 0
+            url = "stratum+tcp://127.0.0.1:1"
+            user = "acct.worker"
+            password = "x"
+            enabled = true
+            "#,
+        )
+        .unwrap();
+        let supervisor = Supervisor::with_backend_mode(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            config,
+            RuntimeBackendMode::HardwareMining,
+        )
+        .unwrap();
+
+        let before = supervisor.stratum_engine.lock().unwrap().reconnects_total;
+        let overview = supervisor.dashboard_overview();
+        let metrics = supervisor.prometheus_metrics();
+        let after = supervisor.stratum_engine.lock().unwrap().reconnects_total;
+
+        assert_eq!(before, 0);
+        assert_eq!(after, 0);
+        assert_eq!(overview.pool_runtime.reconnects_total, 0);
+        assert!(!overview.stratum.socket_open);
+        assert!(metrics.contains("omo_pool_reconnects_total 0"));
+        assert!(metrics.contains("omo_stratum_socket_open 0"));
     }
 
     #[test]

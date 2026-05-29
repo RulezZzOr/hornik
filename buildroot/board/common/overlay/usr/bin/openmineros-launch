@@ -42,4 +42,5 @@ fi
 exec "$CONTROL_PLANE_BIN" \
     --board "$BOARD" \
     --model "$MODEL" \
+    --config /etc/openmineros/config.toml \
     --backend "$OPENMINEROS_BACKEND"

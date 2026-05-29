@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
+set -o pipefail
 
 image="${1:-}"
 disk="${2:-}"
@@ -27,6 +28,28 @@ esac
 case "$disk" in
   *s[0-9]*) fail "use the whole disk, not a partition: $disk" ;;
 esac
+
+metadata="${image%.img.xz}.json"
+[ -f "$metadata" ] || fail "metadata not found for raw image: $metadata"
+
+expected_sha256="$(
+  python3 - "$metadata" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+metadata = Path(sys.argv[1])
+with metadata.open("r", encoding="utf-8") as handle:
+    data = json.load(handle)
+
+try:
+    print(data["compressed_sha256"])
+except KeyError as exc:
+    raise SystemExit(f"missing {exc.args[0]} in {metadata}") from exc
+PY
+)"
+actual_sha256="$(shasum -a 256 "$image" | awk '{print $1}')"
+[ "$actual_sha256" = "$expected_sha256" ] || fail "image hash mismatch for $image"
 
 info="$(diskutil info "$disk")"
 printf '%s\n' "$info"

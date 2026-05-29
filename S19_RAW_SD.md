@@ -79,7 +79,8 @@ OPENMINEROS_ALLOW_RAW_SD_WRITE=1 \
 ```
 
 The script refuses non-raw-candidate images and refuses to run unless explicitly
-armed with `OPENMINEROS_ALLOW_RAW_SD_WRITE=1`.
+armed with `OPENMINEROS_ALLOW_RAW_SD_WRITE=1`. It also verifies the image hash
+against the sidecar JSON (`compressed_sha256`) before writing.
 
 ## First Boot Collection
 
