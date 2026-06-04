@@ -118,7 +118,10 @@ The control plane defaults to the `simulated` backend for local development.
 For board bring-up work, `hardware-probe` exposes the same API shape but stays
 read-only and reports zero hashrate until ASIC bus probing is implemented.
 `hardware-mining` enables live Stratum V1 socket/session handling plus ASIC job
-dispatch over the board UART path.
+dispatch. On S19 XIL it carries a real BM1398 FPGA chain driver
+(`/dev/axi_fpga_dev`), but that path is **disarmed by default**: it only touches
+the FPGA when an operator sets `OPENMINEROS_ALLOW_FPGA=1`, and stays inert on any
+host where the device is absent.
 `GET /api/v1/hardware/probe` checks expected OS paths only; it does not issue
 GPIO, UART, fan, voltage, clock, pool, or ASIC commands.
 Set `OPENMINEROS_PROBE_ROOT=/path/to/target-root` to scan a mounted S19 root

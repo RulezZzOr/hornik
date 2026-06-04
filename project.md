@@ -36,7 +36,7 @@ final flashable miner firmware.
 | Readiness model | Done | `MiningReady` is distinct from read-only identification |
 | macOS raw SD writer | Done | pipefail plus SHA-256 guard before writing |
 | Pool strategy and Stratum V1 contract | Partial | Present as runtime scaffold and read-only/live bridge |
-| ASIC transport and chip scheduler | Partial | Real BM1398 VIL codec (`asic-backend::bm1398`), mmap FPGA register transport (`asic-backend::axi`, `/dev/axi_fpga_dev`), and a chain driver tying them together (`asic-backend::bm1398_driver`: enumerate, set-frequency, submit-work, poll-nonces) all host-unit-tested; register map/opcodes/FIFO handshake documented from the stock `.bmu` but `NEEDS-HW-CONFIRM` and not yet driven on a board |
+| ASIC transport and chip scheduler | Partial | Real BM1398 VIL codec (`asic-backend::bm1398`), mmap FPGA register transport (`asic-backend::axi`, `/dev/axi_fpga_dev`), and a chain driver (`asic-backend::bm1398_driver`) are wired into `HardwareMiningBackend` as a gated FPGA session (bring-up / submit-work / poll-nonces), opt-in via `OPENMINEROS_ALLOW_FPGA=1` on S19 XIL only. Most wire details are now CONFIRMED against the stock `bmminer` (Ghidra); the remaining gap before live mining is a stratum-job -> BM1398 work builder (midstate computation) |
 | Thermal and fan control | Missing | No real sensor loop or thermal shutdown path yet |
 | Signed updates and flashable image | Partial | Update metadata and install bundles exist, but not a production flash flow |
 | Production NAND firmware | Missing | The repo does not yet ship a final flashable image |
@@ -123,6 +123,13 @@ firmware release:
      - still NEEDS-HW-CONFIRM: the exact chip-vs-core split inside the nonce
        selector, the exact nbits/ntime/merkle assignment of header words 2-4, and
        the full chip register map,
+     - the real BM1398 driver is now wired into `HardwareMiningBackend` as a
+       gated FPGA session (`bring_up_chain` / `fpga_submit_work` /
+       `fpga_poll_nonces`), opt-in via `OPENMINEROS_ALLOW_FPGA=1` on Xilinx only;
+       it stays inert on dev hosts because `/dev/axi_fpga_dev` is absent,
+     - the supervisor dispatch path still uses the synthetic codec because a
+       stratum-job -> BM1398 work builder (block-header assembly + SHA-256
+       midstate computation) does not exist yet; that is the next piece,
      - real on-board chip discovery (validate the enumeration walk returns chips),
      - stable init sequence (baud, ticket mask, version rolling, core config),
      - full 8-byte nonce-frame reassembly from the RX FIFO,

@@ -45,6 +45,8 @@ pub enum BackendError {
         #[source]
         source: AsicFrameError,
     },
+    #[error("bm1398 fpga path unavailable: {reason}")]
+    FpgaUnavailable { reason: String },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -518,12 +520,29 @@ pub struct HardwareMiningBackend {
     uart_path: PathBuf,
     protocol: AsicProtocol,
     uart_transport: Arc<Mutex<Option<UartTransport>>>,
+    /// Path to the real FPGA register device used by the BM1398 chain driver.
+    fpga_device_path: PathBuf,
+    /// Whether real FPGA writes are explicitly armed (opt-in, off by default).
+    fpga_armed: bool,
+    /// Lazily-opened real BM1398 chain driver (S19 XIL only).
+    fpga_session: Arc<Mutex<Option<bm1398_driver::Bm1398Driver>>>,
 }
 
 #[derive(Debug)]
 struct UartTransport {
     file: File,
     rx_buffer: Vec<u8>,
+}
+
+/// Result of bringing up a real BM1398 chain over the FPGA.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChainBringUp {
+    /// FPGA hardware/version word read back from the board.
+    pub fpga_version: u32,
+    /// Number of chips the enumeration walk addressed.
+    pub enumerated_chips: u16,
+    /// Frequency actually realized by the PLL solver, in MHz.
+    pub frequency_mhz: u16,
 }
 
 impl HardwareMiningBackend {
@@ -536,6 +555,21 @@ impl HardwareMiningBackend {
         board: BoardFamily,
         uart_path: PathBuf,
     ) -> Result<Self, BackendError> {
+        let fpga_device_path = env::var_os("OPENMINEROS_FPGA_DEV")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/dev/axi_fpga_dev"));
+        let fpga_armed = env::var_os("OPENMINEROS_ALLOW_FPGA")
+            .is_some_and(|value| value == "1" || value == "true");
+        Self::with_config(model, board, uart_path, fpga_device_path, fpga_armed)
+    }
+
+    fn with_config(
+        model: Model,
+        board: BoardFamily,
+        uart_path: PathBuf,
+        fpga_device_path: PathBuf,
+        fpga_armed: bool,
+    ) -> Result<Self, BackendError> {
         let support = target_support(model, board)?;
         let profile = board_profile(board);
 
@@ -546,6 +580,9 @@ impl HardwareMiningBackend {
             uart_path,
             protocol: AsicProtocol::for_board(board),
             uart_transport: Arc::new(Mutex::new(None)),
+            fpga_device_path,
+            fpga_armed,
+            fpga_session: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -853,6 +890,104 @@ impl HardwareMiningBackend {
     pub fn bm1398_decode_nonce(&self, words: &[u32; 4]) -> Option<bm1398::NonceEntry> {
         self.supports_bm1398()
             .then(|| bm1398::decode_nonce_block(words))
+    }
+
+    /// Whether the real FPGA path is usable: an S19 XIL board with writes armed.
+    ///
+    /// Arming requires `OPENMINEROS_ALLOW_FPGA=1`; it is off by default so the
+    /// runtime never touches `/dev/axi_fpga_dev` unless an operator opts in. This
+    /// is the in-backend half of the hardware safety gate for the BM1398 path.
+    pub fn fpga_armed(&self) -> bool {
+        self.fpga_armed && self.supports_bm1398()
+    }
+
+    /// Acquire the lazily-opened BM1398 chain driver, opening the FPGA device on
+    /// first use. Errors (kept inert) when the path is not armed, the board is
+    /// not Xilinx, or the device is absent — e.g. on a development host.
+    fn fpga_session(
+        &self,
+    ) -> Result<std::sync::MutexGuard<'_, Option<bm1398_driver::Bm1398Driver>>, BackendError> {
+        if self.profile.family != BoardFamily::Xilinx {
+            return Err(BackendError::FpgaUnavailable {
+                reason: "the BM1398 FPGA path is only available on S19 XIL (Xilinx) boards"
+                    .to_string(),
+            });
+        }
+        if !self.fpga_armed {
+            return Err(BackendError::FpgaUnavailable {
+                reason: "FPGA writes are not armed; set OPENMINEROS_ALLOW_FPGA=1 to enable"
+                    .to_string(),
+            });
+        }
+        let mut guard = self
+            .fpga_session
+            .lock()
+            .expect("fpga session mutex poisoned");
+        if guard.is_none() {
+            if !self.fpga_device_path.exists() {
+                return Err(BackendError::FpgaUnavailable {
+                    reason: format!(
+                        "fpga device {} is not present on this host",
+                        self.fpga_device_path.display()
+                    ),
+                });
+            }
+            let driver = bm1398_driver::Bm1398Driver::open_device(&self.fpga_device_path)
+                .map_err(|source| BackendError::FpgaUnavailable {
+                    reason: format!(
+                        "failed to open fpga device {}: {source}",
+                        self.fpga_device_path.display()
+                    ),
+                })?;
+            *guard = Some(driver);
+        }
+        Ok(guard)
+    }
+
+    /// Bring up the real BM1398 chain: read the FPGA version, enumerate
+    /// `chip_count` chips, and set the chain frequency. Gated by [`Self::fpga_armed`].
+    pub fn bring_up_chain(
+        &self,
+        chain: u8,
+        chip_count: u16,
+        frequency_mhz: u16,
+    ) -> Result<ChainBringUp, BackendError> {
+        let mut guard = self.fpga_session()?;
+        let driver = guard.as_mut().expect("fpga session initialized");
+        let fpga_version = driver.fpga_version();
+        driver.enable_nonce_rx();
+        let enumerated_chips = driver.enumerate(chain, chip_count);
+        let pll = driver
+            .set_frequency_all(chain, frequency_mhz)
+            .ok_or(BackendError::FpgaUnavailable {
+                reason: format!("frequency {frequency_mhz} MHz is not solvable for BM1398"),
+            })?;
+        Ok(ChainBringUp {
+            fpga_version,
+            enumerated_chips,
+            frequency_mhz: pll.realized_mhz as u16,
+        })
+    }
+
+    /// Submit a prepared [`bm1398::WorkItem`] to the real chain over the FPGA.
+    pub fn fpga_submit_work(&self, work: &bm1398::WorkItem) -> Result<(), BackendError> {
+        let mut guard = self.fpga_session()?;
+        let driver = guard.as_mut().expect("fpga session initialized");
+        driver
+            .submit_work_item(work)
+            .map_err(|source| BackendError::FpgaUnavailable {
+                reason: format!("invalid work item: {source:?}"),
+            })
+    }
+
+    /// Drain and decode up to `max_entries` nonces from the real chain.
+    pub fn fpga_poll_nonces(
+        &self,
+        max_entries: usize,
+    ) -> Result<Vec<bm1398::NonceEntry>, BackendError> {
+        let mut guard = self.fpga_session()?;
+        let driver = guard.as_mut().expect("fpga session initialized");
+        Ok(driver.poll_nonces(max_entries))
     }
 
     fn open_uart_transport(&self) -> std::io::Result<UartTransport> {
@@ -2025,5 +2160,76 @@ mod tests {
         assert_eq!(identity.backend, RuntimeBackendMode::HardwareProbe);
         assert_eq!(identity.configured_board, BoardFamily::Xilinx);
         assert_eq!(identity.configured_model, Model::S19jPro);
+    }
+
+    #[test]
+    fn fpga_path_is_unavailable_on_non_xilinx_boards() {
+        let backend = HardwareMiningBackend::with_config(
+            Model::S19jPro,
+            BoardFamily::BeagleBone,
+            PathBuf::from("/dev/null"),
+            PathBuf::from("/nonexistent-fpga"),
+            true,
+        )
+        .unwrap();
+        assert!(!backend.fpga_armed());
+        assert!(matches!(
+            backend.bring_up_chain(0, 76, 525),
+            Err(BackendError::FpgaUnavailable { .. })
+        ));
+    }
+
+    #[test]
+    fn fpga_path_is_disarmed_by_default() {
+        let backend = HardwareMiningBackend::with_config(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            asic_uart_path(BoardFamily::Xilinx),
+            PathBuf::from("/nonexistent-fpga"),
+            false,
+        )
+        .unwrap();
+        assert!(!backend.fpga_armed());
+        match backend.bring_up_chain(0, 76, 525) {
+            Err(BackendError::FpgaUnavailable { reason }) => assert!(reason.contains("not armed")),
+            other => panic!("expected disarmed error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fpga_bring_up_runs_against_a_mapped_device() {
+        // Back the register window with a regular file sized to the window.
+        let path = temp_uart_path();
+        let file = fs::File::create(&path).unwrap();
+        file.set_len(crate::axi::WINDOW_BYTES as u64).unwrap();
+        drop(file);
+
+        let backend = HardwareMiningBackend::with_config(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            asic_uart_path(BoardFamily::Xilinx),
+            path.clone(),
+            true,
+        )
+        .unwrap();
+        assert!(backend.fpga_armed());
+
+        let report = backend.bring_up_chain(0, 76, 525).expect("bring up");
+        assert_eq!(report.enumerated_chips, 76);
+        assert_eq!(report.frequency_mhz, 525);
+
+        // Work submission and nonce drain also reach the mapped device.
+        let work = bm1398::WorkItem {
+            work_id: 1,
+            starting_nonce: 0,
+            nbits: 0x1700_7fff,
+            ntime: 0x6500_0000,
+            merkle_root_tail: [0; 4],
+            midstates: vec![[0u8; 32]; bm1398::WORK_MIDSTATES],
+        };
+        backend.fpga_submit_work(&work).expect("submit work");
+        assert!(backend.fpga_poll_nonces(4).expect("poll").is_empty());
+
+        let _ = fs::remove_file(&path);
     }
 }
