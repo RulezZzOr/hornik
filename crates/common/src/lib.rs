@@ -7,6 +7,7 @@ pub mod firmware;
 pub mod identity;
 pub mod job;
 pub mod manifest;
+pub mod mining;
 pub mod overview;
 pub mod pool;
 pub mod probe;

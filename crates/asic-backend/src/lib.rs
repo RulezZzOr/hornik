@@ -1,6 +1,7 @@
 pub mod axi;
 pub mod bm1398;
 pub mod bm1398_driver;
+pub mod work_builder;
 
 use openmineros_common::{
     BoardFamily, BoardProfile, Capability, CapabilitySet, ChainStatus, HardwareIdentityObservation,
@@ -967,6 +968,27 @@ impl HardwareMiningBackend {
             enumerated_chips,
             frequency_mhz: pll.realized_mhz as u16,
         })
+    }
+
+    /// Build a BM1398 work item from a full Stratum job and submit it to the
+    /// real chain. Ties the work builder to the gated FPGA path.
+    pub fn fpga_submit_job(
+        &self,
+        job: &openmineros_common::mining::MiningJob,
+        extranonce1: &[u8],
+        extranonce2: &[u8],
+        version_rolls: [u32; openmineros_common::mining::VERSION_ROLL_MIDSTATES],
+        work_id: u8,
+    ) -> Result<(), BackendError> {
+        let work = work_builder::build_work_item(
+            job,
+            extranonce1,
+            extranonce2,
+            version_rolls,
+            work_id,
+            0,
+        );
+        self.fpga_submit_work(&work)
     }
 
     /// Submit a prepared [`bm1398::WorkItem`] to the real chain over the FPGA.

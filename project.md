@@ -127,9 +127,16 @@ firmware release:
        gated FPGA session (`bring_up_chain` / `fpga_submit_work` /
        `fpga_poll_nonces`), opt-in via `OPENMINEROS_ALLOW_FPGA=1` on Xilinx only;
        it stays inert on dev hosts because `/dev/axi_fpga_dev` is absent,
-     - the supervisor dispatch path still uses the synthetic codec because a
-       stratum-job -> BM1398 work builder (block-header assembly + SHA-256
-       midstate computation) does not exist yet; that is the next piece,
+     - the stratum-job -> BM1398 work builder now exists: `common::mining`
+       (SHA-256 block compression/midstate cross-checked against `sha2`,
+       double-SHA-256, merkle-root folding, coinbase assembly, `MiningJob`) and
+       `asic-backend::work_builder::build_work_item` produce a real version-rolled
+       4-midstate `WorkItem`; `HardwareMiningBackend::fpga_submit_job` ties it to
+       the gated FPGA path,
+     - remaining before live dispatch: have the Stratum layer retain full notify
+       data (coinb1/coinb2/branches/extranonce) instead of the privacy preview,
+       and validate the header byte-order (version/prev-hash/ntime/nbits swaps,
+       tagged NEEDS-HW-CONFIRM in `common::mining`) against a real accepted share,
      - real on-board chip discovery (validate the enumeration walk returns chips),
      - stable init sequence (baud, ticket mask, version rolling, core config),
      - full 8-byte nonce-frame reassembly from the RX FIFO,
