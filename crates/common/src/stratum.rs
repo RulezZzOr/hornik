@@ -1,4 +1,5 @@
 use crate::JobPipelinePolicy;
+use crate::mining::MiningJob;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
@@ -286,6 +287,67 @@ pub struct StratumJobTemplate {
     pub clean_jobs: bool,
 }
 
+/// A full `mining.notify` job, including the coinbase parts and merkle branch
+/// hashes that the API-facing [`StratumJobTemplate`] preview deliberately omits.
+///
+/// This type is intentionally **not** `Serialize`/`Deserialize`: it carries the
+/// data needed to assemble a coinbase and must never be exposed through the API.
+/// It exists only to feed the work builder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StratumNotifyJob {
+    pub job_id: String,
+    pub prev_hash: String,
+    pub coinb1: String,
+    pub coinb2: String,
+    pub merkle_branches: Vec<String>,
+    pub version: String,
+    pub bits: String,
+    pub time: String,
+    pub clean_jobs: bool,
+}
+
+impl StratumNotifyJob {
+    /// The API-safe preview of this job (no coinbase, branch count only).
+    pub fn preview(&self) -> StratumJobTemplate {
+        StratumJobTemplate {
+            job_id: self.job_id.clone(),
+            prev_hash: self.prev_hash.clone(),
+            merkle_branch_len: self.merkle_branches.len(),
+            version: self.version.clone(),
+            bits: self.bits.clone(),
+            time: self.time.clone(),
+            clean_jobs: self.clean_jobs,
+        }
+    }
+
+    /// Convert into a header-ready [`MiningJob`] for the work builder.
+    ///
+    /// Applies the standard Stratum -> header byte order: `version`, `bits` and
+    /// `time` are parsed as big-endian hex `u32`; `prev_hash` is decoded and
+    /// byte-swapped within each 32-bit word. The prev-hash word swap is the
+    /// usual cgminer convention and is `NEEDS-HW-CONFIRM` against a real share.
+    pub fn to_mining_job(&self) -> Result<MiningJob, StratumMessageError> {
+        let version = parse_hex_u32(&self.version, "version")?;
+        let nbits = parse_hex_u32(&self.bits, "bits")?;
+        let ntime = parse_hex_u32(&self.time, "time")?;
+        let prev_hash = swap_words_32(&decode_hex_array::<32>(&self.prev_hash, "prev_hash")?);
+        let merkle_branches = self
+            .merkle_branches
+            .iter()
+            .map(|branch| decode_hex_array::<32>(branch, "merkle branch entry"))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(MiningJob {
+            version,
+            prev_hash,
+            coinb1: decode_hex(&self.coinb1, "coinb1")?,
+            coinb2: decode_hex(&self.coinb2, "coinb2")?,
+            merkle_branches,
+            nbits,
+            ntime,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StratumMessageKind {
@@ -424,6 +486,87 @@ fn parse_notify(params: &[Value]) -> Result<StratumJobTemplate, StratumMessageEr
     })
 }
 
+/// Parse a full `mining.notify` params array, retaining the coinbase parts and
+/// merkle branch hashes (use [`StratumNotifyJob::preview`] for the API-safe view).
+pub fn parse_notify_full(params: &[Value]) -> Result<StratumNotifyJob, StratumMessageError> {
+    if params.len() < 9 {
+        return Err(StratumMessageError::InvalidParams(
+            "notify requires at least 9 params",
+        ));
+    }
+
+    let merkle_array =
+        params
+            .get(4)
+            .and_then(Value::as_array)
+            .ok_or(StratumMessageError::InvalidParams(
+                "notify merkle_branch must be array",
+            ))?;
+    let mut merkle_branches = Vec::with_capacity(merkle_array.len());
+    for branch in merkle_array {
+        let branch = branch.as_str().ok_or(StratumMessageError::InvalidParams(
+            "merkle branch entries must be hex strings",
+        ))?;
+        validate_hex(branch, "merkle branch entry")?;
+        merkle_branches.push(branch.to_string());
+    }
+
+    Ok(StratumNotifyJob {
+        job_id: string_param(params, 0, "job_id")?,
+        prev_hash: hex_param(params, 1, "prev_hash")?,
+        coinb1: hex_param(params, 2, "coinb1")?,
+        coinb2: hex_param(params, 3, "coinb2")?,
+        merkle_branches,
+        version: hex_param(params, 5, "version")?,
+        bits: hex_param(params, 6, "bits")?,
+        time: hex_param(params, 7, "time")?,
+        clean_jobs: params.get(8).and_then(Value::as_bool).ok_or(
+            StratumMessageError::InvalidParams("notify clean_jobs must be bool"),
+        )?,
+    })
+}
+
+fn parse_hex_u32(value: &str, name: &'static str) -> Result<u32, StratumMessageError> {
+    validate_hex(value, name)?;
+    if value.len() != 8 {
+        return Err(StratumMessageError::InvalidHex(name));
+    }
+    u32::from_str_radix(value, 16).map_err(|_| StratumMessageError::InvalidHex(name))
+}
+
+fn decode_hex(value: &str, name: &'static str) -> Result<Vec<u8>, StratumMessageError> {
+    validate_hex(value, name)?;
+    (0..value.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&value[i..i + 2], 16)
+                .map_err(|_| StratumMessageError::InvalidHex(name))
+        })
+        .collect()
+}
+
+fn decode_hex_array<const N: usize>(
+    value: &str,
+    name: &'static str,
+) -> Result<[u8; N], StratumMessageError> {
+    decode_hex(value, name)?
+        .try_into()
+        .map_err(|_| StratumMessageError::InvalidHex(name))
+}
+
+/// Reverse the byte order within each 32-bit word of a 32-byte hash — the
+/// Stratum prev-hash to block-header convention.
+fn swap_words_32(input: &[u8; 32]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for (word_in, word_out) in input.chunks_exact(4).zip(out.chunks_exact_mut(4)) {
+        word_out[0] = word_in[3];
+        word_out[1] = word_in[2];
+        word_out[2] = word_in[1];
+        word_out[3] = word_in[0];
+    }
+    out
+}
+
 fn string_param(
     params: &[Value],
     index: usize,
@@ -545,6 +688,47 @@ mod tests {
         assert_eq!(notify.job_id, "job-1");
         assert_eq!(notify.merkle_branch_len, 2);
         assert!(notify.clean_jobs);
+    }
+
+    #[test]
+    fn parse_notify_full_converts_to_mining_job() {
+        let branch = "aa".repeat(32);
+        let message = format!(
+            r#"["job-1",
+                "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+                "01000000", "ffffffff", ["{branch}"],
+                "20000000", "1700ffff", "65000000", true]"#
+        );
+        let params: Vec<Value> = serde_json::from_str(&message).unwrap();
+        let job = parse_notify_full(&params).unwrap();
+
+        assert_eq!(job.job_id, "job-1");
+        assert_eq!(job.coinb1, "01000000");
+        assert_eq!(job.merkle_branches.len(), 1);
+        // The API-safe preview drops the coinbase parts.
+        assert_eq!(job.preview().merkle_branch_len, 1);
+
+        let mining = job.to_mining_job().unwrap();
+        assert_eq!(mining.version, 0x2000_0000);
+        assert_eq!(mining.nbits, 0x1700_ffff);
+        assert_eq!(mining.ntime, 0x6500_0000);
+        assert_eq!(mining.coinb1, vec![0x01, 0x00, 0x00, 0x00]);
+        assert_eq!(mining.coinb2, vec![0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(mining.merkle_branches, vec![[0xaa; 32]]);
+        // prev-hash is byte-swapped per 32-bit word: 00112233 -> 33221100.
+        assert_eq!(&mining.prev_hash[0..4], &[0x33, 0x22, 0x11, 0x00]);
+    }
+
+    #[test]
+    fn to_mining_job_rejects_short_merkle_branch() {
+        let params: Vec<Value> = serde_json::from_str(
+            r#"["j",
+                "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+                "00", "00", ["0011"], "20000000", "1700ffff", "65000000", true]"#,
+        )
+        .unwrap();
+        let job = parse_notify_full(&params).unwrap();
+        assert!(job.to_mining_job().is_err());
     }
 
     #[test]

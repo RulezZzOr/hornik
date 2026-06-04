@@ -133,10 +133,16 @@ firmware release:
        `asic-backend::work_builder::build_work_item` produce a real version-rolled
        4-midstate `WorkItem`; `HardwareMiningBackend::fpga_submit_job` ties it to
        the gated FPGA path,
-     - remaining before live dispatch: have the Stratum layer retain full notify
-       data (coinb1/coinb2/branches/extranonce) instead of the privacy preview,
-       and validate the header byte-order (version/prev-hash/ntime/nbits swaps,
-       tagged NEEDS-HW-CONFIRM in `common::mining`) against a real accepted share,
+     - the Stratum layer can now retain full notify data:
+       `stratum::parse_notify_full` -> `StratumNotifyJob` (intentionally not
+       Serialize, with `preview()` for the API-safe view) -> `to_mining_job()`
+       feeds the work builder. The whole data pipeline notify -> MiningJob ->
+       WorkItem -> 148-byte frame is unit-tested end to end across crates,
+     - remaining before live dispatch: a live Stratum socket client (subscribe /
+       authorize / notify loop, currently no sockets in 0.1.0) that drives
+       `fpga_submit_job` with the negotiated extranonce, plus on-board validation
+       of the header byte-order (NEEDS-HW-CONFIRM swaps in `common::mining` /
+       `stratum::to_mining_job`) against a real accepted share,
      - real on-board chip discovery (validate the enumeration walk returns chips),
      - stable init sequence (baud, ticket mask, version rolling, core config),
      - full 8-byte nonce-frame reassembly from the RX FIFO,
