@@ -1,3 +1,7 @@
+pub mod axi;
+pub mod bm1398;
+pub mod bm1398_driver;
+
 use openmineros_common::{
     BoardFamily, BoardProfile, Capability, CapabilitySet, ChainStatus, HardwareIdentityObservation,
     HardwareIdentityReport, HardwareProbeReport, HealthStatus, MinerMode, MinerStatus, Model,
@@ -797,6 +801,58 @@ impl HardwareMiningBackend {
             step_frequency_mhz,
             step_voltage_mv,
         )
+    }
+
+    /// Whether this backend drives a real BM1398 chain (S19 XIL / BHB428xx).
+    pub fn supports_bm1398(&self) -> bool {
+        self.profile.family == BoardFamily::Xilinx
+    }
+
+    /// Resolve the PLL dividers for `frequency_mhz` on the BM1398 chain.
+    ///
+    /// Returns `None` on non-Xilinx boards or an unsolvable target.
+    pub fn bm1398_pll(&self, frequency_mhz: u16) -> Option<bm1398::Bm1398Pll> {
+        self.supports_bm1398()
+            .then(|| bm1398::solve_pll(frequency_mhz))
+            .flatten()
+    }
+
+    /// Build the real VIL frame that sets the BM1398 PLL frequency.
+    ///
+    /// When `chip_address` is `None` the write is broadcast to every chip.
+    /// Returns `None` on non-Xilinx boards or an unsolvable target.
+    pub fn bm1398_set_frequency_frame(
+        &self,
+        chip_address: Option<u8>,
+        frequency_mhz: u16,
+    ) -> Option<Vec<u8>> {
+        let pll = self.bm1398_pll(frequency_mhz)?;
+        Some(
+            bm1398::VilCommand::WriteRegister {
+                all: chip_address.is_none(),
+                chip_address: chip_address.unwrap_or(0),
+                register: bm1398::reg::PLL0_PARAMETER,
+                value: pll.to_register(),
+            }
+            .to_frame(),
+        )
+    }
+
+    /// Build the VIL command stream that enumerates the BM1398 chain.
+    ///
+    /// Returns an empty stream on non-Xilinx boards.
+    pub fn bm1398_enumerate_chain(&self, chip_count: u16, interval: u8) -> Vec<Vec<u8>> {
+        if self.supports_bm1398() {
+            bm1398::enumerate_chain(chip_count, interval)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Decode one BM1398 nonce FIFO block (four words: regs 4/5/4/5).
+    pub fn bm1398_decode_nonce(&self, words: &[u32; 4]) -> Option<bm1398::NonceEntry> {
+        self.supports_bm1398()
+            .then(|| bm1398::decode_nonce_block(words))
     }
 
     fn open_uart_transport(&self) -> std::io::Result<UartTransport> {

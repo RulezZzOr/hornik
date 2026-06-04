@@ -3,3 +3,5 @@
 /.DS_Store
 *.log
 .playwright-mcp/
+# Vendor stock firmware blobs (reference only, do not commit)
+*.bmu

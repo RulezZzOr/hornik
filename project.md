@@ -5,7 +5,7 @@ This file is the working status and forward-plan document for OpenMinerOS.
 is the current state ledger: what is built, what is still missing, and what
 the next development steps are.
 
-Last updated: 2026-05-23
+Last updated: 2026-06-04
 
 ## 1. What OpenMinerOS Is
 
@@ -36,7 +36,7 @@ final flashable miner firmware.
 | Readiness model | Done | `MiningReady` is distinct from read-only identification |
 | macOS raw SD writer | Done | pipefail plus SHA-256 guard before writing |
 | Pool strategy and Stratum V1 contract | Partial | Present as runtime scaffold and read-only/live bridge |
-| ASIC transport and chip scheduler | Partial | Frame helpers and UART plumbing exist, but not a verified low-level driver |
+| ASIC transport and chip scheduler | Partial | Real BM1398 VIL codec (`asic-backend::bm1398`), mmap FPGA register transport (`asic-backend::axi`, `/dev/axi_fpga_dev`), and a chain driver tying them together (`asic-backend::bm1398_driver`: enumerate, set-frequency, submit-work, poll-nonces) all host-unit-tested; register map/opcodes/FIFO handshake documented from the stock `.bmu` but `NEEDS-HW-CONFIRM` and not yet driven on a board |
 | Thermal and fan control | Missing | No real sensor loop or thermal shutdown path yet |
 | Signed updates and flashable image | Partial | Update metadata and install bundles exist, but not a production flash flow |
 | Production NAND firmware | Missing | The repo does not yet ship a final flashable image |
@@ -86,10 +86,43 @@ These are the real blockers between the current codebase and a usable miner
 firmware release:
 
 1. **Verified ASIC transport on real hardware**
-   - chip discovery on the chain,
-   - stable init sequence,
-   - job dispatch that matches the actual board protocol,
-   - nonce/share capture from real hashboard traffic.
+   - architecture (recovered from the stock `.bmu`): S19 XIL reaches the BM1398
+     chain through an FPGA in the Zynq PL, mmap'd at `/dev/axi_fpga_dev`
+     (`bitmain_axi.ko`); the work TX FIFO and nonce RX FIFO live in the FPGA.
+     The earlier `/dev/ttyPS0` text protocol was a placeholder, not the real bus,
+   - the BM1398 VIL command codec now exists (`asic-backend::bm1398`): CRC5/CRC16,
+     register read/write framing, PLL divider solver, chain-address enumeration,
+     and nonce-word decode, all unit-tested on the host,
+   - the FPGA AXI mmap transport now exists (`asic-backend::axi`): volatile
+     word-addressed register access over `/dev/axi_fpga_dev`, command-buffer
+     write, work-FIFO push, nonce-FIFO pop, host-tested via an anonymous mapping,
+   - a chain driver ties protocol and transport together
+     (`asic-backend::bm1398_driver`: enumerate / set-frequency / submit-work /
+     poll-nonces),
+   - still missing before real hashing:
+     - CONFIRMED against the stock firmware (Ghidra decompile of `bmminer` +
+       `bitmain_axi.ko`): FPGA window base `0x4000_0000` / size `0x1400`; the
+       CRC-5 routine (matches our `crc5` exactly); the VIL register-write frame
+       (header `0x41`/`0x51`, length 9, big-endian value, CRC-5 over the 8 bytes,
+       and **no** `0x55 0xAA` preamble on the CPU side — the FPGA adds it); the
+       FPGA version register (offset 0); and the command path (data words at
+       offsets `0x31/0x32/0x33`, control/trigger at `0x30` = `0x8080_0000 |
+       chain<<16`, busy = bit31); the nonce RX FIFO (data regs 4/5 read
+       alternately, status reg 6 with entry count `(v & 0x7fff) >> 1`, control
+       reg 7 enable bit `0x1_0000`); and the work TX FIFO (first word -> reg
+       0x10, rest -> reg 0x11, per-chain ready bits in reg 3). The code was
+       corrected to match all of these,
+     - the nonce-entry field decode is now CONFIRMED from bmminer
+       (`FUN_00034810`): metadata word `byte0 & 0x40` = CRC error, `byte3 & 0x60`
+       = register-response flag, `byte1` = work id, `byte2`+`byte3[4:0]` = a
+       chip/core selector, with the nonce in the second word,
+     - still NEEDS-HW-CONFIRM: the exact chip-vs-core split inside that selector,
+       the full chip register map, and the work-frame wire layout,
+     - real on-board chip discovery (validate the enumeration walk returns chips),
+     - stable init sequence (baud, ticket mask, version rolling, core config),
+     - full 8-byte nonce-frame reassembly from the RX FIFO,
+     - nonce/share capture from real hashboard traffic,
+     - wire the driver into the live dispatch path behind the safety gate.
 
 2. **Thermal and power control**
    - fan feedback and control,
