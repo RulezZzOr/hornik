@@ -189,7 +189,7 @@ mod tests {
             nbits: 0x1700_7fff,
             ntime: 0x6500_0000,
             merkle_root_tail: [0; 4],
-            midstates: vec![[0u8; 32]],
+            midstates: vec![[0u8; 32]; bm1398::WORK_MIDSTATES],
         };
         assert!(driver.submit_work_item(&work).is_ok());
     }

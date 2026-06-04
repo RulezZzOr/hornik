@@ -116,8 +116,13 @@ firmware release:
        (`FUN_00034810`): metadata word `byte0 & 0x40` = CRC error, `byte3 & 0x60`
        = register-response flag, `byte1` = work id, `byte2`+`byte3[4:0]` = a
        chip/core selector, with the nonce in the second word,
-     - still NEEDS-HW-CONFIRM: the exact chip-vs-core split inside that selector,
-       the full chip register map, and the work-frame wire layout,
+     - the work-frame wire layout is now CONFIRMED from bmminer (`FUN_0002591c`
+       + builder `FUN_000420e8`): a fixed 148-byte frame = a 5-word (20-byte)
+       header plus exactly four 32-byte midstates, all big-endian, no preamble
+       and no CRC; the first word streams to work FIFO reg 0x10, the rest to 0x11,
+     - still NEEDS-HW-CONFIRM: the exact chip-vs-core split inside the nonce
+       selector, the exact nbits/ntime/merkle assignment of header words 2-4, and
+       the full chip register map,
      - real on-board chip discovery (validate the enumeration walk returns chips),
      - stable init sequence (baud, ticket mask, version rolling, core config),
      - full 8-byte nonce-frame reassembly from the RX FIFO,

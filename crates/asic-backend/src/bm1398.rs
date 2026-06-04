@@ -386,54 +386,59 @@ pub struct WorkItem {
     pub ntime: u32,
     /// Final 4 bytes of the merkle root that follow the midstate boundary.
     pub merkle_root_tail: [u8; 4],
-    /// One to four 32-byte SHA-256 midstates (more than one enables AsicBoost).
+    /// Exactly four 32-byte SHA-256 midstates (BM1398 AsicBoost version rolling).
     pub midstates: Vec<[u8; 32]>,
 }
 
 /// Error returned when a [`WorkItem`] cannot be serialized.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkError {
-    /// `midstates` was empty or held more than four entries.
+    /// `midstates` did not hold exactly [`WORK_MIDSTATES`] entries.
     InvalidMidstateCount(usize),
 }
 
+/// Midstates required in a BM1398 work item (four, for AsicBoost version rolling).
+pub const WORK_MIDSTATES: usize = 4;
+/// Size of a serialized BM1398 work frame, in bytes (20-byte header + 4x32B).
+pub const WORK_FRAME_LEN: usize = 20 + WORK_MIDSTATES * 32;
+
 impl WorkItem {
-    /// Serialize into a VIL job frame: `0x55 0xAA | header | length | work_id |
-    /// num_midstates | starting_nonce[4] LE | nbits[4] | ntime[4] |
-    /// merkle_tail[4] | midstate[32]... | crc16[2]`.
+    /// Serialize into the fixed 148-byte BM1398 work frame.
     ///
-    /// `NEEDS-HW-CONFIRM`: field endianness and whether the FPGA expects the
-    /// CRC16 in big- or little-endian byte order on BHB428xx.
+    /// Layout CONFIRMED from the stock bmminer work builder (`FUN_0002591c`):
+    /// a 5-word (20-byte) header followed by exactly four 32-byte midstates,
+    /// all big-endian, with **no** preamble and **no** CRC (the FPGA / work FIFO
+    /// owns any framing beyond this). The first word goes to the work FIFO's
+    /// "first" register, the rest stream into the data register.
+    ///
+    /// Header words: `[0]` work id (big-endian), `[1]` starting nonce (the one
+    /// header word bmminer leaves un-swapped, i.e. little-endian), `[2]` nbits,
+    /// `[3]` ntime, `[4]` merkle-root tail, words 2-4 big-endian. The exact
+    /// nbits/ntime/merkle assignment of words 2-4 is `NEEDS-HW-CONFIRM`.
     pub fn to_frame(&self) -> Result<Vec<u8>, WorkError> {
-        let count = self.midstates.len();
-        if count == 0 || count > 4 {
-            return Err(WorkError::InvalidMidstateCount(count));
+        if self.midstates.len() != WORK_MIDSTATES {
+            return Err(WorkError::InvalidMidstateCount(self.midstates.len()));
         }
 
-        let header = vil::TYPE_JOB | vil::GROUP_ALL;
-        // After the preamble: header(1) + length(1) + work_id(1) + num(1)
-        // + starting_nonce(4) + nbits(4) + ntime(4) + merkle_tail(4)
-        // + midstate(32*count) + crc16(2) = 22 + 32*count.
-        let length = (22 + 32 * count) as u8;
+        let mut frame = Vec::with_capacity(WORK_FRAME_LEN);
+        // Header: word0 big-endian work id, word1 raw little-endian nonce.
+        frame.extend_from_slice(&u32::from(self.work_id).to_be_bytes());
+        frame.extend_from_slice(&self.starting_nonce.to_le_bytes());
+        frame.extend_from_slice(&self.nbits.to_be_bytes());
+        frame.extend_from_slice(&self.ntime.to_be_bytes());
+        let mut tail = self.merkle_root_tail;
+        tail.reverse(); // emit as a big-endian word
+        frame.extend_from_slice(&tail);
 
-        let mut body = Vec::with_capacity(usize::from(length));
-        body.push(header);
-        body.push(length);
-        body.push(self.work_id);
-        body.push(count as u8);
-        body.extend_from_slice(&self.starting_nonce.to_le_bytes());
-        body.extend_from_slice(&self.nbits.to_be_bytes());
-        body.extend_from_slice(&self.ntime.to_be_bytes());
-        body.extend_from_slice(&self.merkle_root_tail);
+        // Four midstates, each 32-bit word byte-swapped to big-endian.
         for midstate in &self.midstates {
-            body.extend_from_slice(midstate);
+            for chunk in midstate.chunks_exact(4) {
+                let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                frame.extend_from_slice(&word.to_be_bytes());
+            }
         }
-        let crc = crc16_false(&body);
-        body.extend_from_slice(&crc.to_be_bytes());
 
-        let mut frame = Vec::with_capacity(body.len() + 2);
-        frame.extend_from_slice(&TX_PREAMBLE);
-        frame.extend_from_slice(&body);
+        debug_assert_eq!(frame.len(), WORK_FRAME_LEN);
         Ok(frame)
     }
 }
@@ -634,48 +639,51 @@ mod tests {
     }
 
     #[test]
-    fn work_frame_is_job_typed_and_crc_protected() {
-        let frame = sample_work(1).to_frame().expect("one midstate");
-        assert_eq!(&frame[0..2], &TX_PREAMBLE);
-        assert_eq!(frame[2], vil::TYPE_JOB | vil::GROUP_ALL);
-        assert_eq!(frame[4], 0x2A); // work_id
-        assert_eq!(frame[5], 1); // num_midstates
-
-        // The trailing CRC16 must validate over the body (everything after the
-        // preamble except the two CRC bytes).
-        let body = &frame[2..frame.len() - 2];
-        let crc = u16::from_be_bytes([frame[frame.len() - 2], frame[frame.len() - 1]]);
-        assert_eq!(crc16_false(body), crc);
+    fn work_frame_is_fixed_148_bytes_with_big_endian_work_id() {
+        let frame = sample_work(WORK_MIDSTATES).to_frame().expect("four midstates");
+        assert_eq!(frame.len(), WORK_FRAME_LEN);
+        assert_eq!(WORK_FRAME_LEN, 148);
+        // word0: big-endian work id (0x2A) in the low byte.
+        assert_eq!(&frame[0..4], &[0x00, 0x00, 0x00, 0x2A]);
+        // No 0x55 0xAA preamble: the FPGA / work FIFO owns outer framing.
+        assert_ne!(&frame[0..2], &TX_PREAMBLE);
     }
 
     #[test]
-    fn work_frame_length_grows_with_midstate_count() {
-        let one = sample_work(1).to_frame().unwrap();
-        let four = sample_work(4).to_frame().unwrap();
-        // Each extra midstate adds 32 bytes.
-        assert_eq!(four.len() - one.len(), 3 * 32);
-        // Declared length byte covers everything after the preamble.
-        assert_eq!(usize::from(one[3]), one.len() - 2);
-    }
-
-    #[test]
-    fn work_frame_rejects_empty_and_oversized_midstates() {
+    fn work_frame_requires_exactly_four_midstates() {
         assert_eq!(
             sample_work(0).to_frame(),
             Err(WorkError::InvalidMidstateCount(0))
         );
         assert_eq!(
+            sample_work(1).to_frame(),
+            Err(WorkError::InvalidMidstateCount(1))
+        );
+        assert_eq!(
             sample_work(5).to_frame(),
             Err(WorkError::InvalidMidstateCount(5))
         );
+        assert!(sample_work(4).to_frame().is_ok());
     }
 
     #[test]
-    fn work_frame_starting_nonce_is_little_endian() {
-        let mut work = sample_work(1);
+    fn work_frame_starting_nonce_is_little_endian_in_header_word1() {
+        let mut work = sample_work(WORK_MIDSTATES);
         work.starting_nonce = 0x0102_0304;
         let frame = work.to_frame().unwrap();
-        // work_id at [4], num_midstates at [5], starting_nonce at [6..10] LE.
-        assert_eq!(&frame[6..10], &[0x04, 0x03, 0x02, 0x01]);
+        // Header word1 (bytes 4..8) is the one word bmminer leaves un-swapped.
+        assert_eq!(&frame[4..8], &[0x04, 0x03, 0x02, 0x01]);
+    }
+
+    #[test]
+    fn work_frame_midstates_are_byte_swapped_to_big_endian() {
+        let mut work = sample_work(WORK_MIDSTATES);
+        // Distinct first midstate to observe the per-word byte swap.
+        let mut ms = [0u8; 32];
+        ms[0..4].copy_from_slice(&[0x01, 0x02, 0x03, 0x04]);
+        work.midstates[0] = ms;
+        let frame = work.to_frame().unwrap();
+        // Midstates start at byte 20; first word emitted big-endian.
+        assert_eq!(&frame[20..24], &[0x04, 0x03, 0x02, 0x01]);
     }
 }
