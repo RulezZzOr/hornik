@@ -73,9 +73,11 @@ pub use thermal::{
     ChainTemps, ThermalAction, ThermalDecision, ThermalLimits, ThermalMonitor,
 };
 pub use tuning::{
-    ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningExecutionState,
-    TuningExecutionStatus, TuningExecutionStep, TuningGuardrails, TuningMode, TuningPhase,
-    TuningPlanResponse, TuningPlanState, TuningProtocolFrame, TuningProtocolSequenceSpec,
-    TuningProtocolTranscript, TuningStep, TuningTargetType, profile_catalog, tuning_plan_steps,
+    ProfileInfo, ProfilesResponse, StepMeasurement, TuningConfig, TuningConfigError,
+    TuningExecutionState, TuningExecutionStatus, TuningExecutionStep, TuningExecutor,
+    TuningExecutorState, TuningGuardrails, TuningMode, TuningOutcome, TuningPhase,
+    TuningPlanResponse, TuningPlanState, TuningProfile, TuningProtocolFrame,
+    TuningProtocolSequenceSpec, TuningProtocolTranscript, TuningStep, TuningTargetType,
+    profile_catalog, tuning_plan_steps,
 };
 pub use update::{SlotInfo, SlotState, UpdateStatus};

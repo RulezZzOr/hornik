@@ -164,10 +164,14 @@ firmware release:
    - safe board isolation when a chain misbehaves.
 
 3. **Tuning executor**
-   - chip-by-chip downclock/upclock,
-   - voltage trim,
-   - discover-then-lock tuning profile flow,
-   - safe rollback to last known-good profile.
+   - the discover-then-lock state machine now exists (`common::tuning::TuningExecutor`):
+     it walks downclock -> upclock -> voltage-trim steps, keeps a last-known-good
+     profile, rolls back on any guardrail breach (thermal, HW error rate, rejected
+     shares, upclock hashrate regression), and locks the final profile; pure and
+     unit-tested,
+   - remaining: drive it from real per-step measurements on hardware and apply the
+     targets through the BM1398 frequency/voltage frames (frame builders already
+     exist in `asic-backend`).
 
 4. **Flashable production image**
    - signed release manifest,

@@ -342,6 +342,165 @@ pub enum TuningConfigError {
     AutotuneDisabledInSafeMode,
 }
 
+/// A concrete operating point the executor applies and may lock or roll back to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TuningProfile {
+    pub frequency_mhz: u16,
+    pub voltage_mv: u16,
+}
+
+/// Measured chain behaviour after holding a tuning step for its dwell time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct StepMeasurement {
+    pub hashrate_ths: f64,
+    pub hw_error_rate_percent: f64,
+    pub chip_temp_max_c: f64,
+    /// Whether the pool rejected shares produced at this step.
+    pub rejected_shares: bool,
+}
+
+/// What recording a measurement did to the executor.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum TuningOutcome {
+    /// Step accepted; hold the chain at `next` for the next dwell.
+    Advance { next: TuningProfile },
+    /// All steps accepted; `profile` is the locked best operating point.
+    Locked { profile: TuningProfile },
+    /// A guardrail tripped; the chain was rolled back to the last safe profile.
+    RolledBack { safe: TuningProfile, reason: String },
+}
+
+/// Lifecycle state of a [`TuningExecutor`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TuningExecutorState {
+    Running,
+    Locked,
+    RolledBack,
+}
+
+/// Discover-then-lock tuning executor with always-available rollback.
+///
+/// It walks a sequence of [`TuningExecutionStep`]s (baseline -> downclock ->
+/// upclock -> voltage trim). After each step the operator records a
+/// [`StepMeasurement`]; a step that breaches the [`TuningGuardrails`] (thermal,
+/// HW error rate, rejected shares) or regresses hashrate during the upclock
+/// phase causes an immediate rollback to the last known-good profile. Only after
+/// every step passes does the executor lock the final profile, so the runtime
+/// can always fall back to a safe operating point.
+#[derive(Debug, Clone)]
+pub struct TuningExecutor {
+    steps: Vec<TuningExecutionStep>,
+    guardrails: TuningGuardrails,
+    index: usize,
+    baseline_hashrate_ths: f64,
+    last_known_good: TuningProfile,
+    state: TuningExecutorState,
+}
+
+impl TuningExecutor {
+    /// Start from a known-good `baseline` profile and its measured hashrate.
+    pub fn new(
+        baseline: TuningProfile,
+        baseline_hashrate_ths: f64,
+        steps: Vec<TuningExecutionStep>,
+        guardrails: TuningGuardrails,
+    ) -> Self {
+        Self {
+            steps,
+            guardrails,
+            index: 0,
+            baseline_hashrate_ths,
+            last_known_good: baseline,
+            state: TuningExecutorState::Running,
+        }
+    }
+
+    pub fn state(&self) -> TuningExecutorState {
+        self.state
+    }
+
+    /// The last profile proven safe (the baseline until a step is accepted).
+    pub fn last_known_good(&self) -> TuningProfile {
+        self.last_known_good
+    }
+
+    /// The profile the current step asks the chain to hold, if still running.
+    pub fn current_target(&self) -> Option<TuningProfile> {
+        if self.state != TuningExecutorState::Running {
+            return None;
+        }
+        self.steps.get(self.index).map(|step| TuningProfile {
+            frequency_mhz: step.target_frequency_mhz,
+            voltage_mv: step.target_voltage_mv,
+        })
+    }
+
+    /// Record the measurement for the current step and advance, lock, or roll back.
+    pub fn record(&mut self, measurement: StepMeasurement) -> TuningOutcome {
+        let Some(step) = self.steps.get(self.index).cloned() else {
+            // Nothing left to run: already locked at the last known-good profile.
+            return TuningOutcome::Locked {
+                profile: self.last_known_good,
+            };
+        };
+        let target = TuningProfile {
+            frequency_mhz: step.target_frequency_mhz,
+            voltage_mv: step.target_voltage_mv,
+        };
+
+        if let Some(reason) = self.guardrail_breach(step.phase, &measurement) {
+            self.state = TuningExecutorState::RolledBack;
+            return TuningOutcome::RolledBack {
+                safe: self.last_known_good,
+                reason,
+            };
+        }
+
+        // Step passed: it becomes the new known-good point.
+        self.last_known_good = target;
+        self.index += 1;
+
+        match self.current_target() {
+            Some(next) => TuningOutcome::Advance { next },
+            None => {
+                self.state = TuningExecutorState::Locked;
+                TuningOutcome::Locked {
+                    profile: self.last_known_good,
+                }
+            }
+        }
+    }
+
+    /// Return the first guardrail a measurement breaches, if any.
+    fn guardrail_breach(&self, phase: TuningPhase, m: &StepMeasurement) -> Option<String> {
+        if m.chip_temp_max_c > self.guardrails.max_chip_temp_c {
+            return Some(format!(
+                "chip temp {:.1}C exceeds tuning limit {:.1}C",
+                m.chip_temp_max_c, self.guardrails.max_chip_temp_c
+            ));
+        }
+        if m.hw_error_rate_percent > self.guardrails.max_hw_error_rate_percent {
+            return Some(format!(
+                "hw error rate {:.3}% exceeds limit {:.3}%",
+                m.hw_error_rate_percent, self.guardrails.max_hw_error_rate_percent
+            ));
+        }
+        if self.guardrails.rollback_on_rejected_shares && m.rejected_shares {
+            return Some("pool rejected shares at this step".to_string());
+        }
+        // The upclock phase must not regress hashrate below the baseline.
+        if phase == TuningPhase::UpclockStability && m.hashrate_ths < self.baseline_hashrate_ths {
+            return Some(format!(
+                "upclock hashrate {:.2} TH/s regressed below baseline {:.2} TH/s",
+                m.hashrate_ths, self.baseline_hashrate_ths
+            ));
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,5 +568,128 @@ mod tests {
                 .windows(2)
                 .all(|window| window[0].order < window[1].order)
         );
+    }
+
+    fn step(order: u8, phase: TuningPhase, freq: u16, volt: u16) -> TuningExecutionStep {
+        TuningExecutionStep {
+            order,
+            phase,
+            command: "set".to_string(),
+            target_frequency_mhz: freq,
+            target_voltage_mv: volt,
+            min_duration_seconds: 300,
+        }
+    }
+
+    fn sweep_steps() -> Vec<TuningExecutionStep> {
+        vec![
+            step(1, TuningPhase::DownclockEfficiency, 520, 1420),
+            step(2, TuningPhase::UpclockStability, 540, 1420),
+            step(3, TuningPhase::VoltageTrim, 540, 1410),
+        ]
+    }
+
+    fn good() -> StepMeasurement {
+        StepMeasurement {
+            hashrate_ths: 110.0,
+            hw_error_rate_percent: 0.0,
+            chip_temp_max_c: 70.0,
+            rejected_shares: false,
+        }
+    }
+
+    fn executor() -> TuningExecutor {
+        TuningExecutor::new(
+            TuningProfile {
+                frequency_mhz: 525,
+                voltage_mv: 1420,
+            },
+            104.0,
+            sweep_steps(),
+            TuningGuardrails::default(),
+        )
+    }
+
+    #[test]
+    fn all_passing_steps_lock_the_final_profile() {
+        let mut exec = executor();
+        assert_eq!(
+            exec.current_target().unwrap(),
+            TuningProfile { frequency_mhz: 520, voltage_mv: 1420 }
+        );
+        assert!(matches!(exec.record(good()), TuningOutcome::Advance { .. }));
+        assert!(matches!(exec.record(good()), TuningOutcome::Advance { .. }));
+        let outcome = exec.record(good());
+        assert_eq!(
+            outcome,
+            TuningOutcome::Locked {
+                profile: TuningProfile { frequency_mhz: 540, voltage_mv: 1410 }
+            }
+        );
+        assert_eq!(exec.state(), TuningExecutorState::Locked);
+        assert_eq!(exec.current_target(), None);
+    }
+
+    #[test]
+    fn thermal_breach_rolls_back_to_last_known_good() {
+        let mut exec = executor();
+        // First step passes -> known-good becomes 520/1420.
+        assert!(matches!(exec.record(good()), TuningOutcome::Advance { .. }));
+        let hot = StepMeasurement {
+            chip_temp_max_c: 95.0,
+            ..good()
+        };
+        let outcome = exec.record(hot);
+        assert_eq!(
+            outcome,
+            TuningOutcome::RolledBack {
+                safe: TuningProfile { frequency_mhz: 520, voltage_mv: 1420 },
+                reason: "chip temp 95.0C exceeds tuning limit 85.0C".to_string(),
+            }
+        );
+        assert_eq!(exec.state(), TuningExecutorState::RolledBack);
+        assert_eq!(exec.current_target(), None);
+    }
+
+    #[test]
+    fn upclock_hashrate_regression_rolls_back() {
+        let mut exec = executor();
+        exec.record(good()); // downclock ok
+        let regressed = StepMeasurement {
+            hashrate_ths: 100.0, // below baseline 104
+            ..good()
+        };
+        assert!(matches!(
+            exec.record(regressed),
+            TuningOutcome::RolledBack { .. }
+        ));
+    }
+
+    #[test]
+    fn rejected_shares_roll_back_when_guardrail_enabled() {
+        let mut exec = executor();
+        let rejected = StepMeasurement {
+            rejected_shares: true,
+            ..good()
+        };
+        match exec.record(rejected) {
+            TuningOutcome::RolledBack { safe, .. } => {
+                assert_eq!(safe, TuningProfile { frequency_mhz: 525, voltage_mv: 1420 });
+            }
+            other => panic!("expected rollback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hw_error_rate_breach_rolls_back() {
+        let mut exec = executor();
+        let errors = StepMeasurement {
+            hw_error_rate_percent: 1.0,
+            ..good()
+        };
+        assert!(matches!(
+            exec.record(errors),
+            TuningOutcome::RolledBack { .. }
+        ));
     }
 }
