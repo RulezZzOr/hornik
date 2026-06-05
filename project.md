@@ -37,7 +37,7 @@ final flashable miner firmware.
 | macOS raw SD writer | Done | pipefail plus SHA-256 guard before writing |
 | Pool strategy and Stratum V1 contract | Partial | Present as runtime scaffold and read-only/live bridge |
 | ASIC transport and chip scheduler | Partial | Real BM1398 VIL codec (`asic-backend::bm1398`), mmap FPGA register transport (`asic-backend::axi`, `/dev/axi_fpga_dev`), and a chain driver (`asic-backend::bm1398_driver`) are wired into `HardwareMiningBackend` as a gated FPGA session (bring-up / submit-work / poll-nonces), opt-in via `OPENMINEROS_ALLOW_FPGA=1` on S19 XIL only. Most wire details are now CONFIRMED against the stock `bmminer` (Ghidra); the remaining gap before live mining is a stratum-job -> BM1398 work builder (midstate computation) |
-| Thermal and fan control | Missing | No real sensor loop or thermal shutdown path yet |
+| Thermal and fan control | Partial | Thermal safety policy done (`common::thermal`: per-chain board/chip limits, fan ramp, consecutive-overtemp shutdown, fail-safe on bad sensors), grounded in bmminer's overtemp logic and exposed at `GET /api/v1/thermal`; the real sensor reads (PIC I2C / chip register) and fan PWM I/O are the remaining hardware pieces |
 | Signed updates and flashable image | Partial | Update metadata and install bundles exist, but not a production flash flow |
 | Production NAND firmware | Missing | The repo does not yet ship a final flashable image |
 

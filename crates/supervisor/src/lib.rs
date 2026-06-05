@@ -15,7 +15,8 @@ use openmineros_common::{
     StratumEngineState, StratumEngineStatus, StratumMessageKind, StratumShareCandidate,
     StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
     TuningExecutionState, TuningExecutionStatus, TuningLockState, TuningPhase, TuningPlanResponse,
-    StratumExtranonce, TuningProtocolSequenceSpec, TuningProtocolTranscript, UpdateStatus,
+    ChainTemps, StratumExtranonce, ThermalDecision, ThermalLimits, ThermalMonitor,
+    TuningProtocolSequenceSpec, TuningProtocolTranscript, UpdateStatus,
     classify_stratum_message, evaluate_hardware_readiness, evaluate_hardware_safety,
     parse_notify_full, parse_subscribe_extranonce, plan_pool_strategy, precheck_share_submit,
     summarize_pool_runtime, summarize_pools,
@@ -40,6 +41,7 @@ pub struct Supervisor {
     pools: Vec<PoolConfig>,
     pool_policy: PoolConnectionPolicy,
     stratum_engine: Mutex<StratumEngine>,
+    thermal: Mutex<ThermalMonitor>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,7 +100,27 @@ impl Supervisor {
             pools,
             pool_policy,
             stratum_engine: Mutex::new(stratum_engine),
+            thermal: Mutex::new(ThermalMonitor::new(ThermalLimits::default())),
         })
+    }
+
+    /// Evaluate the current board temperatures against the thermal safety policy.
+    pub fn thermal_status(&self) -> ThermalDecision {
+        let chains: Vec<ChainTemps> = self
+            .backend
+            .chain_statuses()
+            .iter()
+            .filter(|chain| chain.present)
+            .map(|chain| ChainTemps {
+                chain: chain.id,
+                board_c: chain.temp_board_c,
+                chip_max_c: chain.temp_chip_max_c,
+            })
+            .collect();
+        self.thermal
+            .lock()
+            .expect("thermal monitor mutex poisoned")
+            .evaluate(&chains)
     }
 
     pub fn system_info(&self) -> SystemInfo {
@@ -2601,6 +2623,21 @@ mod tests {
         assert_eq!(status.active_slot, "slot_a");
         assert_eq!(status.inactive_slot, "slot_b");
         assert!(!status.boot_once_pending);
+    }
+
+    #[test]
+    fn thermal_status_runs_for_in_band_simulated_temps() {
+        let supervisor = Supervisor::with_config(
+            Model::S19jPro,
+            BoardFamily::Xilinx,
+            RuntimeConfig::default(),
+        )
+        .unwrap();
+        let decision = supervisor.thermal_status();
+
+        assert_eq!(decision.action, openmineros_common::ThermalAction::Run);
+        assert!(decision.hottest_chip_c.is_some());
+        assert!(decision.fan_percent >= 30);
     }
 
     #[test]

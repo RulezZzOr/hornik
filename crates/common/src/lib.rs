@@ -17,6 +17,7 @@ pub mod safety;
 pub mod status;
 pub mod stratum;
 pub mod support;
+pub mod thermal;
 pub mod tuning;
 pub mod update;
 
@@ -68,6 +69,9 @@ pub use stratum::{
     parse_notify_full, parse_subscribe_extranonce, precheck_share_submit,
 };
 pub use support::{SupportBundle, SupportBundlePrivacy};
+pub use thermal::{
+    ChainTemps, ThermalAction, ThermalDecision, ThermalLimits, ThermalMonitor,
+};
 pub use tuning::{
     ProfileInfo, ProfilesResponse, TuningConfig, TuningConfigError, TuningExecutionState,
     TuningExecutionStatus, TuningExecutionStep, TuningGuardrails, TuningMode, TuningPhase,

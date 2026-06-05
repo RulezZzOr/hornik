@@ -17,8 +17,9 @@ use openmineros_common::{
     HardwareProbeReport, HardwareReadinessReport, HardwareSafetyGate, JobPipelinePolicy,
     MinerStatus, Model, PoolStrategyResponse, PoolSummary, ProfilesResponse, RuntimeBackendMode,
     RuntimeConfig, RuntimeControlReport, SharePrecheckResult, StratumEngineStatus,
-    StratumShareCandidate, SupportBundle, SystemInfo, TargetCatalog, TuningExecutionStatus,
-    TuningPlanResponse, TuningProtocolTranscript, UpdateStatus, target_catalog,
+    StratumShareCandidate, SupportBundle, SystemInfo, TargetCatalog, ThermalDecision,
+    TuningExecutionStatus, TuningPlanResponse, TuningProtocolTranscript, UpdateStatus,
+    target_catalog,
 };
 use openmineros_supervisor::Supervisor;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -96,6 +97,7 @@ fn build_app(supervisor: Arc<Supervisor>) -> Router {
         .route("/api/v1/miner/status", get(miner_status))
         .route("/api/v1/miner/job-pipeline", get(job_pipeline))
         .route("/api/v1/chains", get(chains))
+        .route("/api/v1/thermal", get(thermal))
         .route("/api/v1/pools", get(pools))
         .route("/api/v1/pools/strategy", get(pool_strategy))
         .route("/api/v1/stratum/status", get(stratum_status))
@@ -171,6 +173,10 @@ async fn job_pipeline(State(supervisor): State<Arc<Supervisor>>) -> Json<JobPipe
 
 async fn chains(State(supervisor): State<Arc<Supervisor>>) -> Json<Vec<ChainStatus>> {
     Json(supervisor.chains())
+}
+
+async fn thermal(State(supervisor): State<Arc<Supervisor>>) -> Json<ThermalDecision> {
+    Json(supervisor.thermal_status())
 }
 
 async fn pools(State(supervisor): State<Arc<Supervisor>>) -> Json<PoolSummary> {

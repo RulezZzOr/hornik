@@ -97,6 +97,7 @@ slot and rollback policy.
 - `GET /api/v1/miner/status`
 - `GET /api/v1/miner/job-pipeline`
 - `GET /api/v1/chains`
+- `GET /api/v1/thermal`
 - `GET /api/v1/stratum/status`
 - `GET /api/v1/stratum/submit-policy`
 - `GET /api/v1/runtime/control`
