@@ -113,6 +113,10 @@ slot and rollback policy.
 `omo-commander matrix` returns the same hardware catalog used by
 `GET /api/v1/hardware/targets`.
 
+`omo-commander fpga-probe --device /dev/axi_fpga_dev` does a **read-only** sample
+of the FPGA register window (it maps `PROT_READ`, so it cannot write) for safe
+on-board validation. See `S19_BRINGUP.md` for the staged bring-up runbook.
+
 ## Runtime Backends
 
 The control plane defaults to the `simulated` backend for local development.

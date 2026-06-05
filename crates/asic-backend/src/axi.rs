@@ -58,8 +58,36 @@ pub struct AxiFpga {
     words: usize,
     /// Length of the mmap in bytes, retained for `munmap`.
     map_len: usize,
+    /// When true the mapping is `PROT_READ` only; writes would fault, so they
+    /// are rejected before they reach the page.
+    readonly: bool,
     /// Kept open for the lifetime of the mapping when backed by a device/file.
     _file: Option<std::fs::File>,
+}
+
+/// Read-only snapshot of the FPGA identity/status registers, for safe on-board
+/// validation of the register map without issuing any writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FpgaProbe {
+    pub fpga_version: u32,
+    pub nonce_fifo_status: u32,
+    pub pending_nonce_entries: u32,
+    pub work_fifo_ready: u32,
+    pub command_busy: bool,
+}
+
+/// Open the FPGA register device read-only and sample its identity/status
+/// registers. Writes are impossible on this mapping, so it is safe to run
+/// against a board that is currently mining under another firmware.
+pub fn probe_readonly(path: impl AsRef<Path>) -> io::Result<FpgaProbe> {
+    let fpga = AxiFpga::map_device_readonly(path)?;
+    Ok(FpgaProbe {
+        fpga_version: fpga.fpga_version(),
+        nonce_fifo_status: fpga.read_word(fpga::NONCE_FIFO_STATUS),
+        pending_nonce_entries: fpga.pending_nonce_entries(),
+        work_fifo_ready: fpga.read_word(fpga::WORK_FIFO_READY),
+        command_busy: fpga.command_busy(),
+    })
 }
 
 // SAFETY: `AxiFpga` owns its mapping exclusively and exposes only `&mut self`
@@ -87,7 +115,26 @@ impl AxiFpga {
                 0,
             )
         };
-        Self::from_mapping(ptr, map_len, Some(file))
+        Self::from_mapping(ptr, map_len, false, Some(file))
+    }
+
+    /// Map the FPGA register device read-only (`PROT_READ`), for safe on-board
+    /// validation. Any attempt to write through the returned handle is rejected.
+    pub fn map_device_readonly(path: impl AsRef<Path>) -> io::Result<Self> {
+        let file = std::fs::OpenOptions::new().read(true).open(path)?;
+        let map_len = WINDOW_WORDS * std::mem::size_of::<u32>();
+        // SAFETY: `file` is a valid readable fd; we map `map_len` bytes read-only.
+        let ptr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                map_len,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                file.as_raw_fd(),
+                0,
+            )
+        };
+        Self::from_mapping(ptr, map_len, true, Some(file))
     }
 
     /// Back the register API with an anonymous shared mapping (host tests).
@@ -104,12 +151,13 @@ impl AxiFpga {
                 0,
             )
         };
-        Self::from_mapping(ptr, map_len, None)
+        Self::from_mapping(ptr, map_len, false, None)
     }
 
     fn from_mapping(
         ptr: *mut libc::c_void,
         map_len: usize,
+        readonly: bool,
         file: Option<std::fs::File>,
     ) -> io::Result<Self> {
         if ptr == libc::MAP_FAILED {
@@ -122,8 +170,14 @@ impl AxiFpga {
             base,
             words: map_len / std::mem::size_of::<u32>(),
             map_len,
+            readonly,
             _file: file,
         })
+    }
+
+    /// Whether this mapping is read-only.
+    pub fn is_readonly(&self) -> bool {
+        self.readonly
     }
 
     /// Read register word at `index` (word offset into the window).
@@ -135,6 +189,7 @@ impl AxiFpga {
 
     /// Write `value` to the register word at `index`.
     pub fn write_word(&mut self, index: usize, value: u32) {
+        assert!(!self.readonly, "refusing to write to a read-only FPGA mapping");
         assert!(index < self.words, "register index {index} out of range");
         // SAFETY: bounds checked above; mapping is writable and word aligned.
         unsafe { self.base.as_ptr().add(index).write_volatile(value) }
@@ -319,6 +374,38 @@ mod tests {
         fpga.write_word(fpga::WORK_FIFO_READY, 1 << 2);
         assert!(fpga.work_fifo_ready(2));
         assert!(!fpga.work_fifo_ready(3));
+    }
+
+    fn temp_window_file() -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("omo-axi-ro-{unique}.bin"));
+        std::fs::write(&path, vec![0u8; WINDOW_BYTES]).unwrap();
+        path
+    }
+
+    #[test]
+    fn probe_readonly_reads_the_version_register() {
+        let path = temp_window_file();
+        let mut buf = vec![0u8; WINDOW_BYTES];
+        buf[0..4].copy_from_slice(&0x1234_5678u32.to_ne_bytes());
+        std::fs::write(&path, &buf).unwrap();
+
+        let probe = probe_readonly(&path).expect("read-only probe");
+        assert_eq!(probe.fpga_version, 0x1234_5678);
+        assert!(!probe.command_busy);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    #[should_panic(expected = "read-only")]
+    fn read_only_mapping_rejects_writes() {
+        let path = temp_window_file();
+        let mut fpga = AxiFpga::map_device_readonly(&path).expect("ro map");
+        assert!(fpga.is_readonly());
+        fpga.write_word(fpga::HARDWARE_VERSION, 1); // must panic before faulting
     }
 
     #[test]

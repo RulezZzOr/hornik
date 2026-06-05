@@ -59,6 +59,11 @@ enum Command {
         #[arg(long)]
         config: PathBuf,
     },
+    /// Read-only probe of the FPGA register window for on-board validation.
+    FpgaProbe {
+        #[arg(long, default_value = "/dev/axi_fpga_dev")]
+        device: PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -250,6 +255,22 @@ fn main() -> anyhow::Result<()> {
                     },
                     "tuning": ProfilesResponse::from(config.tuning),
                     "pools": summarize_pools(&config.pools),
+                }))?
+            );
+        }
+        Command::FpgaProbe { device } => {
+            let probe = openmineros_asic_backend::axi::probe_readonly(&device)
+                .with_context(|| format!("failed to probe fpga device {}", device.display()))?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "device": device.display().to_string(),
+                    "read_only": true,
+                    "fpga_version": format!("0x{:08x}", probe.fpga_version),
+                    "nonce_fifo_status": probe.nonce_fifo_status,
+                    "pending_nonce_entries": probe.pending_nonce_entries,
+                    "work_fifo_ready": format!("0x{:08x}", probe.work_fifo_ready),
+                    "command_busy": probe.command_busy,
                 }))?
             );
         }

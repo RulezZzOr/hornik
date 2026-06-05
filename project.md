@@ -410,5 +410,6 @@ OpenMinerOS is not a finished miner firmware until all of these are true:
 - `DEVFEE.md` - optional contribution model
 - `S19_SD_TEST.md` - safe first boot checklist
 - `S19_RAW_SD.md` - raw SD candidate path
+- `S19_BRINGUP.md` - staged ASIC bring-up and validation runbook
 - `hornik.md` - original design and market analysis
 
