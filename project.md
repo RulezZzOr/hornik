@@ -138,11 +138,19 @@ firmware release:
        Serialize, with `preview()` for the API-safe view) -> `to_mining_job()`
        feeds the work builder. The whole data pipeline notify -> MiningJob ->
        WorkItem -> 148-byte frame is unit-tested end to end across crates,
-     - remaining before live dispatch: a live Stratum socket client (subscribe /
-       authorize / notify loop, currently no sockets in 0.1.0) that drives
-       `fpga_submit_job` with the negotiated extranonce, plus on-board validation
-       of the header byte-order (NEEDS-HW-CONFIRM swaps in `common::mining` /
-       `stratum::to_mining_job`) against a real accepted share,
+     - the live Stratum client now drives real work: the supervisor
+       `StratumEngine` captures the subscribe extranonce
+       (`parse_subscribe_extranonce`), and on each notify builds a BM1398
+       `WorkItem` (full notify -> `MiningJob` -> `build_work_item`) and dispatches
+       it through `AsicJobDispatcher::dispatch_work_item`, which routes to the
+       gated FPGA path only on an armed Xilinx backend (no-op otherwise). The
+       socket still opens only in hardware-mining mode, preserving the
+       no-sockets-by-default posture,
+     - remaining before live hashing is now hardware/validation work, not
+       plumbing: confirm version-rolling mask (currently all four midstates use
+       the base version), validate header byte-order (NEEDS-HW-CONFIRM swaps in
+       `common::mining` / `stratum::to_mining_job`) against a real accepted share,
+       and the nonce-entry chip/core split,
      - real on-board chip discovery (validate the enumeration walk returns chips),
      - stable init sequence (baud, ticket mask, version rolling, core config),
      - full 8-byte nonce-frame reassembly from the RX FIFO,

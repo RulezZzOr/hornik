@@ -113,6 +113,13 @@ pub trait AsicJobDispatcher {
         let _ = (worker, max_reports);
         Ok(Vec::new())
     }
+
+    /// Dispatch a fully-built BM1398 work item. Default is a no-op so backends
+    /// without a real ASIC path are unaffected.
+    fn dispatch_work_item(&self, work: &bm1398::WorkItem) -> Result<(), BackendError> {
+        let _ = work;
+        Ok(())
+    }
 }
 
 pub fn build_tuning_sequence_frames(
@@ -392,6 +399,15 @@ impl BackendHandle {
             Self::Simulated(_) | Self::HardwareProbe(_) => Ok(Vec::new()),
         }
     }
+
+    /// Dispatch a built BM1398 work item, routing to the gated FPGA path only on
+    /// an armed hardware-mining Xilinx backend; otherwise a no-op.
+    pub fn dispatch_work_item(&self, work: &bm1398::WorkItem) -> Result<(), BackendError> {
+        match self {
+            Self::HardwareMining(backend) if backend.fpga_armed() => backend.fpga_submit_work(work),
+            _ => Ok(()),
+        }
+    }
 }
 
 pub fn build_tuning_execution_steps(
@@ -421,6 +437,10 @@ impl AsicJobDispatcher for BackendHandle {
         max_reports: usize,
     ) -> Result<Vec<StratumShareCandidate>, BackendError> {
         Self::collect_share_candidates(self, worker, max_reports)
+    }
+
+    fn dispatch_work_item(&self, work: &bm1398::WorkItem) -> Result<(), BackendError> {
+        Self::dispatch_work_item(self, work)
     }
 }
 

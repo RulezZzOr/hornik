@@ -15,11 +15,13 @@ use openmineros_common::{
     StratumEngineState, StratumEngineStatus, StratumMessageKind, StratumShareCandidate,
     StratumSubmitPolicy, SupportBundle, SupportBundlePrivacy, SystemInfo, TuningConfig,
     TuningExecutionState, TuningExecutionStatus, TuningLockState, TuningPhase, TuningPlanResponse,
-    TuningProtocolSequenceSpec, TuningProtocolTranscript, UpdateStatus, classify_stratum_message,
-    evaluate_hardware_readiness, evaluate_hardware_safety, plan_pool_strategy,
-    precheck_share_submit, summarize_pool_runtime, summarize_pools,
+    StratumExtranonce, TuningProtocolSequenceSpec, TuningProtocolTranscript, UpdateStatus,
+    classify_stratum_message, evaluate_hardware_readiness, evaluate_hardware_safety,
+    parse_notify_full, parse_subscribe_extranonce, plan_pool_strategy, precheck_share_submit,
+    summarize_pool_runtime, summarize_pools,
 };
-use serde_json::json;
+use openmineros_asic_backend::work_builder::build_work_item;
+use serde_json::{Value, json};
 use std::{
     io::{BufRead, BufReader, Write},
     net::{Shutdown, TcpStream},
@@ -1503,6 +1505,12 @@ struct StratumEngine {
     reconnect_suppressed_total: u64,
     stale_jobs_total: u64,
     last_connect_latency_ms: Option<f64>,
+    /// Extranonce negotiated at subscribe, needed to assemble the coinbase.
+    extranonce: Option<StratumExtranonce>,
+    /// Monotonic extranonce2 counter (one work item per increment).
+    extranonce2_counter: u32,
+    /// Rolling work id echoed back with nonces.
+    work_id_counter: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -1561,6 +1569,9 @@ impl StratumEngine {
             stale_jobs_total: 0,
             last_connect_latency_ms: None,
             dispatch_enabled: false,
+            extranonce: None,
+            extranonce2_counter: 0,
+            work_id_counter: 0,
         }
     }
 
@@ -1764,8 +1775,9 @@ impl StratumEngine {
                     if line.is_empty() {
                         continue;
                     }
+                    let raw: Value = serde_json::from_str(line).unwrap_or(Value::Null);
                     match classify_stratum_message(line) {
-                        Ok(classified) => self.handle_message(classified),
+                        Ok(classified) => self.handle_message(classified, &raw),
                         Err(error) => {
                             self.status.state = StratumEngineState::Degraded;
                             self.status.notes = vec![format!("stratum parse error: {}", error)];
@@ -1781,7 +1793,11 @@ impl StratumEngine {
         }
     }
 
-    fn handle_message(&mut self, classified: openmineros_common::StratumMessageClassification) {
+    fn handle_message(
+        &mut self,
+        classified: openmineros_common::StratumMessageClassification,
+        raw: &Value,
+    ) {
         match classified.kind {
             StratumMessageKind::MiningNotify => {
                 if let Some(job) = classified.notify {
@@ -1799,6 +1815,7 @@ impl StratumEngine {
                             self.status.state = StratumEngineState::Degraded;
                             self.status.notes = vec![format!("asic dispatch failed: {}", error)];
                         }
+                        self.dispatch_real_work(raw);
                     }
                 }
             }
@@ -1807,6 +1824,11 @@ impl StratumEngine {
             }
             StratumMessageKind::SubscribeResult => {
                 self.status.subscribed = classified.result_success.unwrap_or(false);
+                if let Some(extranonce) =
+                    raw.get("result").and_then(parse_subscribe_extranonce)
+                {
+                    self.extranonce = Some(extranonce);
+                }
             }
             StratumMessageKind::AuthorizeResult => {
                 self.status.authorized = classified.result_success.unwrap_or(false);
@@ -1819,6 +1841,46 @@ impl StratumEngine {
                 }
             }
             StratumMessageKind::Unknown => {}
+        }
+    }
+
+    /// Build a real BM1398 work item from the full notify and dispatch it over
+    /// the gated FPGA path. A no-op until the pool has assigned an extranonce.
+    /// Version rolling is not applied yet (all four midstates use the base
+    /// version), pending on-board confirmation of the roll mask.
+    fn dispatch_real_work(&mut self, raw: &Value) {
+        let Some(extranonce) = self.extranonce.clone() else {
+            return;
+        };
+        let Some(params) = raw.get("params").and_then(Value::as_array) else {
+            return;
+        };
+        let mining = match parse_notify_full(params).and_then(|job| job.to_mining_job()) {
+            Ok(mining) => mining,
+            Err(_) => return,
+        };
+        let extranonce1 = match extranonce.extranonce1_bytes() {
+            Ok(bytes) => bytes,
+            Err(_) => return,
+        };
+        let extranonce2 = extranonce.extranonce2_bytes(self.extranonce2_counter);
+        self.extranonce2_counter = self.extranonce2_counter.wrapping_add(1);
+        let work_id = self.work_id_counter;
+        self.work_id_counter = self.work_id_counter.wrapping_add(1);
+
+        let version_rolls =
+            [mining.version; openmineros_common::mining::VERSION_ROLL_MIDSTATES];
+        let work = build_work_item(
+            &mining,
+            &extranonce1,
+            &extranonce2,
+            version_rolls,
+            work_id,
+            0,
+        );
+        if let Err(error) = self.dispatcher.dispatch_work_item(&work) {
+            self.status.state = StratumEngineState::Degraded;
+            self.status.notes = vec![format!("asic work dispatch failed: {}", error)];
         }
     }
 
@@ -1873,6 +1935,8 @@ impl StratumEngine {
             let _ = stream.shutdown(Shutdown::Both);
         }
         self.reader = None;
+        // Extranonce is per-connection; force renegotiation on reconnect.
+        self.extranonce = None;
     }
 
     fn may_connect_now(&self) -> bool {
@@ -2031,6 +2095,7 @@ mod tests {
     #[derive(Debug, Default)]
     struct MockDispatcher {
         dispatched_jobs: Mutex<Vec<String>>,
+        dispatched_work: Mutex<Vec<u8>>,
         share_candidates: Mutex<Vec<openmineros_common::StratumShareCandidate>>,
     }
 
@@ -2043,6 +2108,14 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(job.job_id.clone());
+            Ok(())
+        }
+
+        fn dispatch_work_item(
+            &self,
+            work: &openmineros_asic_backend::bm1398::WorkItem,
+        ) -> Result<(), openmineros_asic_backend::BackendError> {
+            self.dispatched_work.lock().unwrap().push(work.work_id);
             Ok(())
         }
 
@@ -2064,6 +2137,44 @@ mod tests {
                 })
                 .collect())
         }
+    }
+
+    #[test]
+    fn notify_builds_and_dispatches_real_work_when_extranonce_known() {
+        let dispatcher = Arc::new(MockDispatcher::default());
+        let mut engine = StratumEngine::new(
+            Vec::new(),
+            JobPipelinePolicy::from(PoolConnectionPolicy::default()),
+            PoolConnectionPolicy::default(),
+            RuntimeBackendMode::HardwareMining,
+            None,
+            dispatcher.clone(),
+        );
+        engine.dispatch_enabled = true;
+
+        let branch = "aa".repeat(32);
+        let prev = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let notify = format!(
+            r#"{{"id":null,"method":"mining.notify","params":["job1","{prev}","01000000","ffffffff",["{branch}"],"20000000","1700ffff","65000000",true]}}"#
+        );
+        let raw: Value = serde_json::from_str(&notify).unwrap();
+
+        // No extranonce yet: notify updates status but builds no real work.
+        engine.handle_message(classify_stratum_message(&notify).unwrap(), &raw);
+        assert!(dispatcher.dispatched_work.lock().unwrap().is_empty());
+
+        // After a subscribe assigns an extranonce, notify dispatches real work.
+        let subscribe: Value =
+            serde_json::from_str(r#"{"id":1,"result":[true,"08000002",4],"error":null}"#).unwrap();
+        engine.handle_message(
+            classify_stratum_message(&subscribe.to_string()).unwrap(),
+            &subscribe,
+        );
+        engine.handle_message(classify_stratum_message(&notify).unwrap(), &raw);
+
+        let dispatched = dispatcher.dispatched_work.lock().unwrap();
+        assert_eq!(dispatched.len(), 1);
+        assert_eq!(dispatched[0], 0); // first work id
     }
 
     fn spawn_mock_stratum_server() -> String {
@@ -2216,7 +2327,7 @@ mod tests {
         .unwrap();
 
         engine.dispatch_enabled = true;
-        engine.handle_message(classified);
+        engine.handle_message(classified, &serde_json::Value::Null);
 
         assert_eq!(engine.status.active_job.as_ref().unwrap().job_id, "job-7");
         assert_eq!(engine.status.pending_jobs, 1);
@@ -2247,7 +2358,7 @@ mod tests {
         )
         .unwrap();
 
-        engine.handle_message(classified);
+        engine.handle_message(classified, &serde_json::Value::Null);
 
         assert!(!engine.status.subscribed);
         assert!(!engine.status.authorized);

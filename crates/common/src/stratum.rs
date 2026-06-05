@@ -348,6 +348,45 @@ impl StratumNotifyJob {
     }
 }
 
+/// Extranonce negotiated in a `mining.subscribe` result: the pool-assigned
+/// `extranonce1` and the size (in bytes) the miner fills for `extranonce2`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StratumExtranonce {
+    pub extranonce1: String,
+    pub extranonce2_size: usize,
+}
+
+impl StratumExtranonce {
+    /// Decode `extranonce1` into bytes.
+    pub fn extranonce1_bytes(&self) -> Result<Vec<u8>, StratumMessageError> {
+        decode_hex(&self.extranonce1, "extranonce1")
+    }
+
+    /// Render a `counter` as an `extranonce2` of the negotiated size, big-endian
+    /// and right-aligned (zero-padded on the left).
+    pub fn extranonce2_bytes(&self, counter: u32) -> Vec<u8> {
+        let mut buf = vec![0u8; self.extranonce2_size];
+        let take = self.extranonce2_size.min(4);
+        let counter_bytes = counter.to_be_bytes();
+        let dst = buf.len() - take;
+        buf[dst..].copy_from_slice(&counter_bytes[4 - take..]);
+        buf
+    }
+}
+
+/// Extract the extranonce from a `mining.subscribe` result array
+/// (`[ subscriptions, extranonce1, extranonce2_size ]`).
+pub fn parse_subscribe_extranonce(result: &Value) -> Option<StratumExtranonce> {
+    let array = result.as_array()?;
+    let extranonce1 = array.get(1)?.as_str()?.to_string();
+    validate_hex(&extranonce1, "extranonce1").ok()?;
+    let extranonce2_size = usize::try_from(array.get(2)?.as_u64()?).ok()?;
+    Some(StratumExtranonce {
+        extranonce1,
+        extranonce2_size,
+    })
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StratumMessageKind {
@@ -717,6 +756,30 @@ mod tests {
         assert_eq!(mining.merkle_branches, vec![[0xaa; 32]]);
         // prev-hash is byte-swapped per 32-bit word: 00112233 -> 33221100.
         assert_eq!(&mining.prev_hash[0..4], &[0x33, 0x22, 0x11, 0x00]);
+    }
+
+    #[test]
+    fn parse_subscribe_extranonce_reads_id_and_size() {
+        let result: Value =
+            serde_json::from_str(r#"[[["mining.notify", "sub"]], "08000002", 4]"#).unwrap();
+        let extranonce = parse_subscribe_extranonce(&result).unwrap();
+        assert_eq!(extranonce.extranonce1, "08000002");
+        assert_eq!(extranonce.extranonce2_size, 4);
+        assert_eq!(extranonce.extranonce1_bytes().unwrap(), vec![0x08, 0x00, 0x00, 0x02]);
+        // counter rendered big-endian, right-aligned in the 4-byte field.
+        assert_eq!(extranonce.extranonce2_bytes(0x0102), vec![0x00, 0x00, 0x01, 0x02]);
+    }
+
+    #[test]
+    fn extranonce2_bytes_zero_pads_wide_fields() {
+        let extranonce = StratumExtranonce {
+            extranonce1: "00".to_string(),
+            extranonce2_size: 8,
+        };
+        assert_eq!(
+            extranonce.extranonce2_bytes(0xdead_beef),
+            vec![0, 0, 0, 0, 0xde, 0xad, 0xbe, 0xef]
+        );
     }
 
     #[test]

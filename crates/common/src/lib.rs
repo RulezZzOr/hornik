@@ -62,9 +62,10 @@ pub use status::{
 };
 pub use stratum::{
     SharePrecheckResult, SharePrecheckVerdict, ShareValidationMode, StratumConnectionState,
-    StratumEngineState, StratumEngineStatus, StratumJobTemplate, StratumMessageClassification,
-    StratumMessageError, StratumMessageKind, StratumProtocol, StratumShareCandidate,
-    StratumSubmitPolicy, classify_stratum_message, precheck_share_submit,
+    StratumEngineState, StratumEngineStatus, StratumExtranonce, StratumJobTemplate,
+    StratumMessageClassification, StratumMessageError, StratumMessageKind, StratumNotifyJob,
+    StratumProtocol, StratumShareCandidate, StratumSubmitPolicy, classify_stratum_message,
+    parse_notify_full, parse_subscribe_extranonce, precheck_share_submit,
 };
 pub use support::{SupportBundle, SupportBundlePrivacy};
 pub use tuning::{
