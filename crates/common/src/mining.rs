@@ -157,6 +157,26 @@ pub fn header_first_block(version: u32, prev_hash: &[u8; 32], merkle_root: &[u8;
 /// Number of version-rolled midstates a BM1398 work item carries (AsicBoost).
 pub const VERSION_ROLL_MIDSTATES: usize = 4;
 
+/// BIP320 version-rolling mask: the block-version bits a miner may roll.
+pub const VERSION_ROLL_MASK: u32 = 0x1fff_e000;
+
+/// Produce [`VERSION_ROLL_MIDSTATES`] distinct header version values for
+/// AsicBoost by rolling the index into the low bits of `mask`, keeping
+/// `base_version`'s bits outside the mask untouched.
+///
+/// The chip rolls the remaining mask bits itself; this only seeds the four
+/// midstates. The exact seed strategy is `NEEDS-HW-CONFIRM`, but every value is
+/// a valid distinct version within the allowed rolling region.
+pub fn version_rolls(base_version: u32, mask: u32) -> [u32; VERSION_ROLL_MIDSTATES] {
+    let shift = mask.trailing_zeros();
+    let mut rolls = [0u32; VERSION_ROLL_MIDSTATES];
+    for (index, slot) in rolls.iter_mut().enumerate() {
+        let rolled = ((index as u32) << shift) & mask;
+        *slot = (base_version & !mask) | rolled;
+    }
+    rolls
+}
+
 /// A fully-specified mining job — the data a Stratum `mining.notify` carries —
 /// in the byte order needed to build the header.
 ///
@@ -330,6 +350,26 @@ mod tests {
         let coinbase = assemble_coinbase(&job.coinb1, &e1, &e2, &job.coinb2);
         let expected = merkle_root(sha256d(&coinbase), &job.merkle_branches);
         assert_eq!(job.merkle_root(&e1, &e2), expected);
+    }
+
+    #[test]
+    fn version_rolls_are_distinct_and_respect_the_mask() {
+        let rolls = version_rolls(0x2000_0000, VERSION_ROLL_MASK);
+        // All four are distinct.
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert_ne!(rolls[i], rolls[j]);
+            }
+        }
+        // Bits outside the mask (here bit 29) are preserved.
+        for roll in rolls {
+            assert_eq!(roll & !VERSION_ROLL_MASK, 0x2000_0000);
+            // The rolled bits stay within the mask.
+            assert_eq!(roll & !VERSION_ROLL_MASK | (roll & VERSION_ROLL_MASK), roll);
+        }
+        // Index 0 leaves the base untouched; index 1 sets the mask's lowest bit.
+        assert_eq!(rolls[0], 0x2000_0000);
+        assert_eq!(rolls[1], 0x2000_0000 | (1 << VERSION_ROLL_MASK.trailing_zeros()));
     }
 
     #[test]

@@ -120,6 +120,15 @@ pub trait AsicJobDispatcher {
         let _ = work;
         Ok(())
     }
+
+    /// Drain decoded nonce entries returned by the chain. Default is empty.
+    fn collect_nonce_entries(
+        &self,
+        max_entries: usize,
+    ) -> Result<Vec<bm1398::NonceEntry>, BackendError> {
+        let _ = max_entries;
+        Ok(Vec::new())
+    }
 }
 
 pub fn build_tuning_sequence_frames(
@@ -408,6 +417,20 @@ impl BackendHandle {
             _ => Ok(()),
         }
     }
+
+    /// Drain decoded nonce entries from the gated FPGA path on an armed Xilinx
+    /// hardware-mining backend; otherwise an empty vector.
+    pub fn collect_nonce_entries(
+        &self,
+        max_entries: usize,
+    ) -> Result<Vec<bm1398::NonceEntry>, BackendError> {
+        match self {
+            Self::HardwareMining(backend) if backend.fpga_armed() => {
+                backend.fpga_poll_nonces(max_entries)
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
 }
 
 pub fn build_tuning_execution_steps(
@@ -441,6 +464,13 @@ impl AsicJobDispatcher for BackendHandle {
 
     fn dispatch_work_item(&self, work: &bm1398::WorkItem) -> Result<(), BackendError> {
         Self::dispatch_work_item(self, work)
+    }
+
+    fn collect_nonce_entries(
+        &self,
+        max_entries: usize,
+    ) -> Result<Vec<bm1398::NonceEntry>, BackendError> {
+        Self::collect_nonce_entries(self, max_entries)
     }
 }
 
@@ -1516,10 +1546,16 @@ fn probe_expectations(board: BoardFamily) -> Vec<ProbeExpectation> {
                 required: false,
             },
             ProbeExpectation {
-                name: "control UART",
+                name: "FPGA ASIC bridge",
+                interface: "axi-fpga",
+                path: "/dev/axi_fpga_dev",
+                required: true,
+            },
+            ProbeExpectation {
+                name: "console UART",
                 interface: "uart",
                 path: "/dev/ttyPS0",
-                required: true,
+                required: false,
             },
             ProbeExpectation {
                 name: "GPIO control",
@@ -2114,6 +2150,7 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("dev/ttyPS0"), b"").unwrap();
+        fs::write(root.join("dev/axi_fpga_dev"), b"").unwrap();
 
         let backend = HardwareProbeBackend::with_probe_root(
             Model::S19jPro,
@@ -2178,12 +2215,19 @@ mod tests {
         assert_eq!(report.backend, RuntimeBackendMode::HardwareProbe);
         assert_eq!(report.board_family, BoardFamily::Xilinx);
         assert!(report.safe_read_only);
-        assert_eq!(report.summary.total, 7);
+        assert_eq!(report.summary.total, 8);
+        // The real ASIC transport is the FPGA AXI bridge, and it is required.
+        assert!(
+            report.checks.iter().any(|check| check.interface == "axi-fpga"
+                && check.path == "/dev/axi_fpga_dev"
+                && check.required)
+        );
+        // The console UART still exists but is no longer the ASIC path.
         assert!(
             report
                 .checks
                 .iter()
-                .any(|check| check.interface == "uart" && check.path == "/dev/ttyPS0")
+                .any(|check| check.interface == "uart" && check.path == "/dev/ttyPS0" && !check.required)
         );
         assert!(
             report

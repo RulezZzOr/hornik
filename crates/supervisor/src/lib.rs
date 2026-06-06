@@ -24,6 +24,7 @@ use openmineros_common::{
 use openmineros_asic_backend::work_builder::build_work_item;
 use serde_json::{Value, json};
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader, Write},
     net::{Shutdown, TcpStream},
     sync::{Arc, Mutex},
@@ -1533,6 +1534,16 @@ struct StratumEngine {
     extranonce2_counter: u32,
     /// Rolling work id echoed back with nonces.
     work_id_counter: u8,
+    /// Per-work_id context needed to turn a returned nonce into a share.
+    work_registry: HashMap<u8, WorkContext>,
+}
+
+/// The job context a returned nonce needs to become a submittable share.
+#[derive(Debug, Clone)]
+struct WorkContext {
+    job_id: String,
+    extranonce2: String,
+    ntime: String,
 }
 
 #[derive(Debug, Clone)]
@@ -1594,6 +1605,7 @@ impl StratumEngine {
             extranonce: None,
             extranonce2_counter: 0,
             work_id_counter: 0,
+            work_registry: HashMap::new(),
         }
     }
 
@@ -1643,6 +1655,7 @@ impl StratumEngine {
 
         self.read_messages();
         self.submit_asic_share_candidates();
+        self.collect_fpga_shares();
         self.update_live_state();
         self.status.submit_policy.enabled_in_build = socket_enabled;
     }
@@ -1877,7 +1890,11 @@ impl StratumEngine {
         let Some(params) = raw.get("params").and_then(Value::as_array) else {
             return;
         };
-        let mining = match parse_notify_full(params).and_then(|job| job.to_mining_job()) {
+        let notify = match parse_notify_full(params) {
+            Ok(notify) => notify,
+            Err(_) => return,
+        };
+        let mining = match notify.to_mining_job() {
             Ok(mining) => mining,
             Err(_) => return,
         };
@@ -1890,8 +1907,10 @@ impl StratumEngine {
         let work_id = self.work_id_counter;
         self.work_id_counter = self.work_id_counter.wrapping_add(1);
 
-        let version_rolls =
-            [mining.version; openmineros_common::mining::VERSION_ROLL_MIDSTATES];
+        let version_rolls = openmineros_common::mining::version_rolls(
+            mining.version,
+            openmineros_common::mining::VERSION_ROLL_MASK,
+        );
         let work = build_work_item(
             &mining,
             &extranonce1,
@@ -1900,9 +1919,59 @@ impl StratumEngine {
             work_id,
             0,
         );
+
+        // Remember what this work_id maps to so a returned nonce becomes a share.
+        self.work_registry.insert(
+            work_id,
+            WorkContext {
+                job_id: notify.job_id.clone(),
+                extranonce2: hex_encode(&extranonce2),
+                ntime: notify.time.clone(),
+            },
+        );
+
         if let Err(error) = self.dispatcher.dispatch_work_item(&work) {
             self.status.state = StratumEngineState::Degraded;
             self.status.notes = vec![format!("asic work dispatch failed: {}", error)];
+        }
+    }
+
+    /// Drain decoded nonces from the ASIC and submit the ones whose work_id maps
+    /// to a known work item. Completes the on-board mining return loop.
+    fn collect_fpga_shares(&mut self) {
+        if !self.dispatch_enabled {
+            return;
+        }
+        let Some(worker) = self.active_pool.as_ref().map(|pool| pool.user.clone()) else {
+            return;
+        };
+        let max = usize::from(self.status.submit_policy.max_submit_queue_depth);
+        let entries = match self.dispatcher.collect_nonce_entries(max) {
+            Ok(entries) => entries,
+            Err(error) => {
+                self.status.state = StratumEngineState::Degraded;
+                self.status.notes = vec![format!("asic nonce receive failed: {}", error)];
+                return;
+            }
+        };
+        for entry in entries {
+            if entry.crc_error || entry.register_response {
+                continue;
+            }
+            let Some(context) = self.work_registry.get(&entry.work_id).cloned() else {
+                continue;
+            };
+            let candidate = StratumShareCandidate {
+                worker: worker.clone(),
+                job_id: context.job_id,
+                extranonce2: context.extranonce2,
+                ntime: context.ntime,
+                nonce: format!("{:08x}", entry.nonce),
+            };
+            let result = self.submit_share(candidate);
+            if !result.submit_allowed {
+                self.status.notes = result.reasons;
+            }
         }
     }
 
@@ -1978,6 +2047,15 @@ fn select_active_pool(pools: &[PoolConfig]) -> Option<PoolConfig> {
 
 fn parse_tcp_endpoint(url: &str) -> Option<String> {
     url.strip_prefix("stratum+tcp://").map(ToString::to_string)
+}
+
+/// Lowercase-hex encode bytes for Stratum share fields (e.g. extranonce2).
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
 }
 
 enum ReadResult {
