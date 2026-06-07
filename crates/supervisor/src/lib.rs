@@ -1536,6 +1536,10 @@ struct StratumEngine {
     work_id_counter: u8,
     /// Per-work_id context needed to turn a returned nonce into a share.
     work_registry: HashMap<u8, WorkContext>,
+    /// Version-rolling mask the pool accepted via `mining.configure`, intersected
+    /// with the chip's BIP320 mask. `None` until negotiated; when `None` the
+    /// engine does not roll the version and submits five-parameter shares.
+    version_roll_mask: Option<u32>,
 }
 
 /// The job context a returned nonce needs to become a submittable share.
@@ -1610,6 +1614,7 @@ impl StratumEngine {
             extranonce2_counter: 0,
             work_id_counter: 0,
             work_registry: HashMap::new(),
+            version_roll_mask: None,
         }
     }
 
@@ -1753,13 +1758,29 @@ impl StratumEngine {
                 .map_err(|error| format!("failed to clone pool socket: {}", error))?,
         );
 
-        let subscribe = serde_json::json!({
+        // Negotiate BIP310 version rolling before subscribe so the pool will
+        // accept the rolled version we send with each share. A pool that does not
+        // support it simply replies with an error we ignore (version_roll_mask
+        // stays None and we fall back to plain, non-rolled work).
+        let configure = json!({
+            "id": 3,
+            "method": "mining.configure",
+            "params": [
+                ["version-rolling"],
+                {
+                    "version-rolling.mask": format!("{:08x}", openmineros_common::mining::VERSION_ROLL_MASK),
+                    "version-rolling.min-bit-count": 2,
+                }
+            ]
+        })
+        .to_string();
+        let subscribe = json!({
             "id": 1,
             "method": "mining.subscribe",
             "params": ["openmineros/0.1.0"]
         })
         .to_string();
-        let authorize = serde_json::json!({
+        let authorize = json!({
             "id": 2,
             "method": "mining.authorize",
             "params": [pool.user, pool.password]
@@ -1767,12 +1788,14 @@ impl StratumEngine {
         .to_string();
 
         writer
-            .write_all(subscribe.as_bytes())
+            .write_all(configure.as_bytes())
+            .and_then(|_| writer.write_all(b"\n"))
+            .and_then(|_| writer.write_all(subscribe.as_bytes()))
             .and_then(|_| writer.write_all(b"\n"))
             .and_then(|_| writer.write_all(authorize.as_bytes()))
             .and_then(|_| writer.write_all(b"\n"))
             .and_then(|_| writer.flush())
-            .map_err(|error| format!("failed to send subscribe/authorize: {}", error))?;
+            .map_err(|error| format!("failed to send configure/subscribe/authorize: {}", error))?;
 
         self.writer = Some(writer);
         self.reader = Some(reader);
@@ -1885,7 +1908,39 @@ impl StratumEngine {
                     self.status.shares_rejected += 1;
                 }
             }
-            StratumMessageKind::Unknown => {}
+            StratumMessageKind::Unknown => {
+                // The only id-3 result we send is mining.configure; capture the
+                // version-rolling mask the pool granted (if any).
+                if classified.id.as_ref().and_then(Value::as_i64) == Some(3) {
+                    self.capture_configure_result(raw);
+                }
+            }
+        }
+    }
+
+    /// Record the version-rolling mask a pool granted in its `mining.configure`
+    /// reply. Only enables rolling when the pool both reports `version-rolling`
+    /// true and the granted mask still overlaps the chip's BIP320 mask.
+    fn capture_configure_result(&mut self, raw: &Value) {
+        let result = match raw.get("result") {
+            Some(Value::Object(map)) => map,
+            _ => return,
+        };
+        let enabled = result
+            .get("version-rolling")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !enabled {
+            return;
+        }
+        let granted = result
+            .get("version-rolling.mask")
+            .and_then(Value::as_str)
+            .and_then(|hex| u32::from_str_radix(hex.trim_start_matches("0x"), 16).ok())
+            .unwrap_or(openmineros_common::mining::VERSION_ROLL_MASK);
+        let effective = granted & openmineros_common::mining::VERSION_ROLL_MASK;
+        if effective != 0 {
+            self.version_roll_mask = Some(effective);
         }
     }
 
@@ -1919,10 +1974,12 @@ impl StratumEngine {
         let work_id = self.work_id_counter;
         self.work_id_counter = self.work_id_counter.wrapping_add(1);
 
-        let version_rolls = openmineros_common::mining::version_rolls(
-            mining.version,
-            openmineros_common::mining::VERSION_ROLL_MASK,
-        );
+        // Only roll the version when the pool negotiated version rolling; the
+        // rolled version is reported per share so the pool can rebuild the header.
+        let version_rolls = match self.version_roll_mask {
+            Some(mask) => openmineros_common::mining::version_rolls(mining.version, mask),
+            None => [mining.version; openmineros_common::mining::VERSION_ROLL_MIDSTATES],
+        };
         let work = build_work_item(
             &mining,
             &extranonce1,
@@ -1977,15 +2034,18 @@ impl StratumEngine {
             // The chip reports which version-rolled midstate matched; submit the
             // share with that exact version so the pool reconstructs the header
             // the chip hashed (otherwise every version-rolled share is rejected).
-            let index = entry.midstate_index(context.version_rolls.len());
-            let rolled_version = context.version_rolls[index];
+            // Only attach the version when version rolling was negotiated.
+            let version = self.version_roll_mask.map(|_| {
+                let index = entry.midstate_index(context.version_rolls.len());
+                format!("{:08x}", context.version_rolls[index])
+            });
             let candidate = StratumShareCandidate {
                 worker: worker.clone(),
                 job_id: context.job_id,
                 extranonce2: context.extranonce2,
                 ntime: context.ntime,
                 nonce: format!("{:08x}", entry.nonce),
-                version: Some(format!("{rolled_version:08x}")),
+                version,
             };
             let result = self.submit_share(candidate);
             if !result.submit_allowed {
@@ -2045,8 +2105,10 @@ impl StratumEngine {
             let _ = stream.shutdown(Shutdown::Both);
         }
         self.reader = None;
-        // Extranonce is per-connection; force renegotiation on reconnect.
+        // Extranonce and version-rolling are per-connection; force renegotiation
+        // on reconnect.
         self.extranonce = None;
+        self.version_roll_mask = None;
     }
 
     fn may_connect_now(&self) -> bool {
@@ -2215,6 +2277,7 @@ mod tests {
     struct MockDispatcher {
         dispatched_jobs: Mutex<Vec<String>>,
         dispatched_work: Mutex<Vec<u8>>,
+        dispatched_midstates: Mutex<Vec<Vec<[u8; 32]>>>,
         share_candidates: Mutex<Vec<openmineros_common::StratumShareCandidate>>,
     }
 
@@ -2235,6 +2298,10 @@ mod tests {
             work: &openmineros_asic_backend::bm1398::WorkItem,
         ) -> Result<(), openmineros_asic_backend::BackendError> {
             self.dispatched_work.lock().unwrap().push(work.work_id);
+            self.dispatched_midstates
+                .lock()
+                .unwrap()
+                .push(work.midstates.clone());
             Ok(())
         }
 
@@ -2294,6 +2361,87 @@ mod tests {
         let dispatched = dispatcher.dispatched_work.lock().unwrap();
         assert_eq!(dispatched.len(), 1);
         assert_eq!(dispatched[0], 0); // first work id
+
+        // Without a negotiated version-rolling mask the four midstates are
+        // identical (no rolling) and no version is rolled into the work.
+        let midstates = dispatcher.dispatched_midstates.lock().unwrap();
+        assert_eq!(midstates[0].len(), 4);
+        assert!(midstates[0].iter().all(|m| *m == midstates[0][0]));
+    }
+
+    fn engine_for_dispatch(dispatcher: Arc<MockDispatcher>) -> StratumEngine {
+        let mut engine = StratumEngine::new(
+            Vec::new(),
+            JobPipelinePolicy::from(PoolConnectionPolicy::default()),
+            PoolConnectionPolicy::default(),
+            RuntimeBackendMode::HardwareMining,
+            None,
+            dispatcher,
+        );
+        engine.dispatch_enabled = true;
+        engine
+    }
+
+    fn feed_subscribe_and_notify(engine: &mut StratumEngine) {
+        let branch = "aa".repeat(32);
+        let prev = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let notify = format!(
+            r#"{{"id":null,"method":"mining.notify","params":["job1","{prev}","01000000","ffffffff",["{branch}"],"20000000","1700ffff","65000000",true]}}"#
+        );
+        let raw: Value = serde_json::from_str(&notify).unwrap();
+        let subscribe: Value =
+            serde_json::from_str(r#"{"id":1,"result":[true,"08000002",4],"error":null}"#).unwrap();
+        engine.handle_message(
+            classify_stratum_message(&subscribe.to_string()).unwrap(),
+            &subscribe,
+        );
+        engine.handle_message(classify_stratum_message(&notify).unwrap(), &raw);
+    }
+
+    #[test]
+    fn configure_result_enables_version_rolling_and_rolls_midstates() {
+        let dispatcher = Arc::new(MockDispatcher::default());
+        let mut engine = engine_for_dispatch(dispatcher.clone());
+
+        // The pool grants version rolling with the standard BIP320 mask.
+        let configure: Value = serde_json::from_str(
+            r#"{"id":3,"result":{"version-rolling":true,"version-rolling.mask":"1fffe000"},"error":null}"#,
+        )
+        .unwrap();
+        engine.handle_message(
+            classify_stratum_message(&configure.to_string()).unwrap(),
+            &configure,
+        );
+        assert_eq!(
+            engine.version_roll_mask,
+            Some(openmineros_common::mining::VERSION_ROLL_MASK)
+        );
+
+        feed_subscribe_and_notify(&mut engine);
+
+        // With rolling negotiated the four midstates are distinct.
+        let midstates = dispatcher.dispatched_midstates.lock().unwrap();
+        assert_eq!(midstates[0].len(), 4);
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert_ne!(midstates[0][i], midstates[0][j]);
+            }
+        }
+    }
+
+    #[test]
+    fn configure_result_without_version_rolling_is_ignored() {
+        let dispatcher = Arc::new(MockDispatcher::default());
+        let mut engine = engine_for_dispatch(dispatcher);
+
+        let configure: Value =
+            serde_json::from_str(r#"{"id":3,"result":{"version-rolling":false},"error":null}"#)
+                .unwrap();
+        engine.handle_message(
+            classify_stratum_message(&configure.to_string()).unwrap(),
+            &configure,
+        );
+        assert_eq!(engine.version_roll_mask, None);
     }
 
     fn spawn_mock_stratum_server() -> String {
@@ -2335,7 +2483,8 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             let mut reader = BufReader::new(stream.try_clone().unwrap());
             let mut line = String::new();
-            for _ in 0..2 {
+            // Handshake is mining.configure, mining.subscribe, mining.authorize.
+            for _ in 0..3 {
                 line.clear();
                 reader.read_line(&mut line).unwrap();
                 captured_worker
