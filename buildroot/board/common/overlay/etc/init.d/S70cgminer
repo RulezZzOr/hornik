@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# OpenMinerOS overrides the vendor cgminer service on patched vendor ramdisks.
+# The control plane starts from S99openmineros instead.
+exit 0

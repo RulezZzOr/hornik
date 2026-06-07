@@ -1,0 +1,46 @@
+#!/bin/sh
+set -eu
+
+RUNTIME_ENV=${RUNTIME_ENV:-/etc/openmineros/runtime.env}
+CONTROL_PLANE_BIN=${CONTROL_PLANE_BIN:-/usr/bin/openmineros-control-plane}
+
+if [ -f "$RUNTIME_ENV" ]; then
+    # shellcheck disable=SC1090
+    . "$RUNTIME_ENV"
+fi
+
+: "${BOARD:=s19-xil}"
+: "${MODEL:=s19j-pro}"
+: "${OPENMINEROS_BACKEND:=hardware-probe}"
+: "${OPENMINEROS_FIRST_BOOT_SAFE:=1}"
+: "${OPENMINEROS_DISABLE_NAND_WRITES:=1}"
+: "${OPENMINEROS_DISABLE_ASIC_WRITES:=1}"
+: "${OPENMINEROS_ALLOW_UNSAFE_HARDWARE:=0}"
+
+if [ "$OPENMINEROS_FIRST_BOOT_SAFE" = "1" ] || [ "$OPENMINEROS_DISABLE_ASIC_WRITES" = "1" ]; then
+    if [ "$OPENMINEROS_BACKEND" != "hardware-probe" ]; then
+        echo "openmineros: forcing hardware-probe backend because first-boot safe mode is active" >&2
+        OPENMINEROS_BACKEND=hardware-probe
+    fi
+fi
+
+if [ "$OPENMINEROS_BACKEND" = "hardware-mining" ] && [ "$OPENMINEROS_ALLOW_UNSAFE_HARDWARE" != "1" ]; then
+    echo "openmineros: refusing hardware-mining backend without OPENMINEROS_ALLOW_UNSAFE_HARDWARE=1" >&2
+    exit 78
+fi
+
+export OPENMINEROS_FIRST_BOOT_SAFE
+export OPENMINEROS_DISABLE_NAND_WRITES
+export OPENMINEROS_DISABLE_ASIC_WRITES
+export OPENMINEROS_ALLOW_UNSAFE_HARDWARE
+
+if [ ! -x "$CONTROL_PLANE_BIN" ]; then
+    echo "openmineros: missing control plane binary at $CONTROL_PLANE_BIN" >&2
+    exit 127
+fi
+
+exec "$CONTROL_PLANE_BIN" \
+    --board "$BOARD" \
+    --model "$MODEL" \
+    --config /etc/openmineros/config.toml \
+    --backend "$OPENMINEROS_BACKEND"

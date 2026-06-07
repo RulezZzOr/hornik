@@ -1,0 +1,57 @@
+#!/bin/sh
+set -eu
+
+failed=0
+
+pass() {
+    echo "PASS $*"
+}
+
+fail() {
+    echo "FAIL $*"
+    failed=1
+}
+
+if command -v dropbear >/dev/null 2>&1 || [ -x /usr/sbin/dropbear ]; then
+    pass "dropbear binary present"
+else
+    fail "dropbear binary missing"
+fi
+
+if [ -f /etc/default/dropbear ] && grep -Eq '(^|[[:space:]])-p[[:space:]]*22([[:space:]]|")' /etc/default/dropbear; then
+    pass "dropbear port 22 configured"
+else
+    fail "dropbear port 22 is not configured"
+fi
+
+if [ -f /etc/default/dropbear ] && grep -Eq '(^|[[:space:]])-s([[:space:]]|")' /etc/default/dropbear; then
+    pass "dropbear password login disabled"
+else
+    fail "dropbear password login is not disabled"
+fi
+
+if [ -s /root/.ssh/authorized_keys ]; then
+    pass "root authorized_keys present"
+else
+    fail "root authorized_keys missing"
+fi
+
+if ps 2>/dev/null | grep -q '[d]ropbear'; then
+    pass "dropbear process running"
+else
+    fail "dropbear process not running"
+fi
+
+if command -v netstat >/dev/null 2>&1; then
+    if netstat -ltn 2>/dev/null | grep -Eq '(^|[[:space:]])[^[:space:]]*:22[[:space:]]'; then
+        pass "tcp port 22 listening"
+    else
+        fail "tcp port 22 is not listening"
+    fi
+else
+    echo "SKIP netstat unavailable"
+fi
+
+if [ "$failed" -ne 0 ]; then
+    exit 1
+fi

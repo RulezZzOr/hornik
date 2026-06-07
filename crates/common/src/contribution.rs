@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_CONTRIBUTION_BENEFICIARY: &str = "bc1qp6d4vxmenug97ghcy027vsn3902yadcj77ka6j";
 pub const MAX_CONTRIBUTION_RATE_PERCENT: f64 = 3.0;
+pub const CONTRIBUTION_TARGET_LOCKED: bool = true;
+pub const MUTABLE_CONTRIBUTION_FIELDS: [&str; 2] = ["enabled", "rate_percent"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContributionEndpoint {
@@ -11,6 +13,7 @@ pub struct ContributionEndpoint {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContributionConfig {
     pub enabled: bool,
     pub rate_percent: f64,
@@ -26,6 +29,17 @@ impl Default for ContributionConfig {
 }
 
 impl ContributionConfig {
+    pub fn validate(self) -> Result<(), ContributionConfigError> {
+        if !(0.0..=MAX_CONTRIBUTION_RATE_PERCENT).contains(&self.rate_percent) {
+            return Err(ContributionConfigError::RateOutOfRange {
+                rate_percent: self.rate_percent,
+                max_rate_percent: MAX_CONTRIBUTION_RATE_PERCENT,
+            });
+        }
+
+        Ok(())
+    }
+
     pub fn scheduled_seconds_per_day(self) -> u32 {
         if !self.enabled {
             return 0;
@@ -34,6 +48,15 @@ impl ContributionConfig {
         let clamped = self.rate_percent.clamp(0.0, MAX_CONTRIBUTION_RATE_PERCENT);
         ((24.0 * 60.0 * 60.0) * (clamped / 100.0)).round() as u32
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+pub enum ContributionConfigError {
+    #[error("contribution rate {rate_percent} is outside allowed range 0.0..={max_rate_percent}")]
+    RateOutOfRange {
+        rate_percent: f64,
+        max_rate_percent: f64,
+    },
 }
 
 pub fn default_contribution_endpoints() -> Vec<ContributionEndpoint> {
@@ -62,6 +85,8 @@ pub struct ContributionStatus {
     pub enabled: bool,
     pub rate_percent: f64,
     pub max_rate_percent: f64,
+    pub target_locked: bool,
+    pub mutable_fields: Vec<String>,
     pub beneficiary: String,
     pub endpoints: Vec<ContributionEndpoint>,
     pub today_scheduled_seconds: u32,
@@ -77,6 +102,11 @@ impl From<ContributionConfig> for ContributionStatus {
                 .rate_percent
                 .clamp(0.0, MAX_CONTRIBUTION_RATE_PERCENT),
             max_rate_percent: MAX_CONTRIBUTION_RATE_PERCENT,
+            target_locked: CONTRIBUTION_TARGET_LOCKED,
+            mutable_fields: MUTABLE_CONTRIBUTION_FIELDS
+                .into_iter()
+                .map(str::to_string)
+                .collect(),
             beneficiary: DEFAULT_CONTRIBUTION_BENEFICIARY.to_string(),
             endpoints: default_contribution_endpoints(),
             today_scheduled_seconds: config.scheduled_seconds_per_day(),
@@ -96,6 +126,8 @@ mod tests {
         assert!(!status.enabled);
         assert_eq!(status.rate_percent, 0.0);
         assert_eq!(status.max_rate_percent, 3.0);
+        assert!(status.target_locked);
+        assert_eq!(status.mutable_fields, ["enabled", "rate_percent"]);
         assert_eq!(status.beneficiary, DEFAULT_CONTRIBUTION_BENEFICIARY);
         assert_eq!(status.today_scheduled_seconds, 0);
     }
@@ -122,6 +154,19 @@ mod tests {
     }
 
     #[test]
+    fn contribution_config_rejects_rates_outside_official_range() {
+        let config = ContributionConfig {
+            enabled: true,
+            rate_percent: 3.1,
+        };
+
+        assert!(matches!(
+            config.validate(),
+            Err(ContributionConfigError::RateOutOfRange { .. })
+        ));
+    }
+
+    #[test]
     fn default_endpoints_are_public_and_auditable() {
         let endpoints = default_contribution_endpoints();
 
@@ -131,5 +176,18 @@ mod tests {
                 .iter()
                 .all(|endpoint| endpoint.user.starts_with(DEFAULT_CONTRIBUTION_BENEFICIARY))
         );
+    }
+
+    #[test]
+    fn official_build_only_allows_rate_and_enabled_to_change() {
+        let status = ContributionStatus::from(ContributionConfig {
+            enabled: true,
+            rate_percent: 2.5,
+        });
+
+        assert!(status.target_locked);
+        assert_eq!(status.mutable_fields, vec!["enabled", "rate_percent"]);
+        assert_eq!(status.beneficiary, DEFAULT_CONTRIBUTION_BENEFICIARY);
+        assert_eq!(status.endpoints, default_contribution_endpoints());
     }
 }

@@ -9,6 +9,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+openmineros-asic-backend = { path = "../asic-backend" }
 openmineros-common = { path = "../common" }
+serde.workspace = true
 serde_json.workspace = true
-
