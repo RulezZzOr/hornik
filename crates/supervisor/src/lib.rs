@@ -1544,6 +1544,10 @@ struct WorkContext {
     job_id: String,
     extranonce2: String,
     ntime: String,
+    /// The four header versions that seeded this work item's midstates. A
+    /// returned nonce names which midstate matched, which selects the rolled
+    /// version that must accompany the `mining.submit`.
+    version_rolls: [u32; openmineros_common::mining::VERSION_ROLL_MIDSTATES],
 }
 
 #[derive(Debug, Clone)]
@@ -1693,16 +1697,22 @@ impl StratumEngine {
             return rejected_share("stratum socket is not open during submit");
         };
 
-        let submit = serde_json::json!({
+        let mut params = vec![
+            json!(candidate.worker),
+            json!(candidate.job_id),
+            json!(candidate.extranonce2),
+            json!(candidate.ntime),
+            json!(candidate.nonce),
+        ];
+        // Version-rolled shares carry the rolled version as the sixth parameter
+        // (BIP310 / Stratum version rolling); omit it for plain work.
+        if let Some(version) = &candidate.version {
+            params.push(json!(version));
+        }
+        let submit = json!({
             "id": 4,
             "method": "mining.submit",
-            "params": [
-                candidate.worker,
-                candidate.job_id,
-                candidate.extranonce2,
-                candidate.ntime,
-                candidate.nonce
-            ]
+            "params": params,
         })
         .to_string();
         if writer.write_all(submit.as_bytes()).is_err()
@@ -1881,8 +1891,10 @@ impl StratumEngine {
 
     /// Build a real BM1398 work item from the full notify and dispatch it over
     /// the gated FPGA path. A no-op until the pool has assigned an extranonce.
-    /// Version rolling is not applied yet (all four midstates use the base
-    /// version), pending on-board confirmation of the roll mask.
+    ///
+    /// The four midstates are seeded with BIP320 version rolls; the rolls are
+    /// recorded in the work registry so a returned nonce can be submitted with
+    /// the matching rolled version.
     fn dispatch_real_work(&mut self, raw: &Value) {
         let Some(extranonce) = self.extranonce.clone() else {
             return;
@@ -1927,6 +1939,7 @@ impl StratumEngine {
                 job_id: notify.job_id.clone(),
                 extranonce2: hex_encode(&extranonce2),
                 ntime: notify.time.clone(),
+                version_rolls,
             },
         );
 
@@ -1961,12 +1974,18 @@ impl StratumEngine {
             let Some(context) = self.work_registry.get(&entry.work_id).cloned() else {
                 continue;
             };
+            // The chip reports which version-rolled midstate matched; submit the
+            // share with that exact version so the pool reconstructs the header
+            // the chip hashed (otherwise every version-rolled share is rejected).
+            let index = entry.midstate_index(context.version_rolls.len());
+            let rolled_version = context.version_rolls[index];
             let candidate = StratumShareCandidate {
                 worker: worker.clone(),
                 job_id: context.job_id,
                 extranonce2: context.extranonce2,
                 ntime: context.ntime,
                 nonce: format!("{:08x}", entry.nonce),
+                version: Some(format!("{rolled_version:08x}")),
             };
             let result = self.submit_share(candidate);
             if !result.submit_allowed {
@@ -2561,6 +2580,7 @@ mod tests {
             extranonce2: "00000002".to_string(),
             ntime: "69fc901d".to_string(),
             nonce: "00000001".to_string(),
+            version: None,
         };
         let result = engine.submit_share(candidate);
         thread::sleep(Duration::from_millis(50));
@@ -2570,13 +2590,62 @@ mod tests {
             openmineros_common::SharePrecheckVerdict::AcceptedForSubmit
         );
         assert!(result.submit_allowed);
-        assert!(
-            captured
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|line| line.contains(r#""method":"mining.submit""#))
+        let lines = captured.lock().unwrap().clone();
+        let submit = lines
+            .iter()
+            .find(|line| line.contains(r#""method":"mining.submit""#))
+            .expect("a mining.submit was sent");
+        let parsed: Value = serde_json::from_str(submit).unwrap();
+        let params = parsed["params"].as_array().unwrap();
+        // Plain (non-version-rolled) share carries exactly five params.
+        assert_eq!(params.len(), 5);
+    }
+
+    #[test]
+    fn version_rolled_share_submit_carries_rolled_version_param() {
+        let dispatcher = Arc::new(MockDispatcher::default());
+        let (pool_url, captured) = spawn_mock_stratum_submit_server();
+        let mut engine = StratumEngine::new(
+            vec![PoolConfig {
+                priority: 0,
+                url: pool_url,
+                user: "acct.worker".to_string(),
+                password: "x".to_string(),
+                enabled: true,
+            }],
+            JobPipelinePolicy::from(PoolConnectionPolicy::default()),
+            PoolConnectionPolicy::default(),
+            RuntimeBackendMode::HardwareMining,
+            Some(0),
+            dispatcher,
         );
+
+        engine.poll(true, true);
+        engine.poll(true, true);
+        engine.status.current_difficulty = Some(4096.0);
+        let active_job_id = engine.status.active_job.as_ref().unwrap().job_id.clone();
+        let candidate = StratumShareCandidate {
+            worker: "acct.worker".to_string(),
+            job_id: active_job_id,
+            extranonce2: "00000002".to_string(),
+            ntime: "69fc901d".to_string(),
+            nonce: "00000001".to_string(),
+            version: Some("2000e000".to_string()),
+        };
+        let result = engine.submit_share(candidate);
+        thread::sleep(Duration::from_millis(50));
+
+        assert!(result.submit_allowed);
+        let lines = captured.lock().unwrap().clone();
+        let submit = lines
+            .iter()
+            .find(|line| line.contains(r#""method":"mining.submit""#))
+            .expect("a mining.submit was sent");
+        let parsed: Value = serde_json::from_str(submit).unwrap();
+        let params = parsed["params"].as_array().unwrap();
+        // Version-rolled share carries the rolled version as the sixth param.
+        assert_eq!(params.len(), 6);
+        assert_eq!(params[5].as_str(), Some("2000e000"));
     }
 
     #[test]
@@ -2588,6 +2657,7 @@ mod tests {
                 extranonce2: "00000002".to_string(),
                 ntime: "69fc901d".to_string(),
                 nonce: "00000001".to_string(),
+                version: None,
             }]),
             ..MockDispatcher::default()
         });

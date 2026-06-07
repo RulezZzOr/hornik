@@ -84,6 +84,7 @@ impl AsicNonceReport {
             extranonce2: self.extranonce2,
             ntime: self.ntime,
             nonce: self.nonce,
+            version: None,
         }
     }
 }

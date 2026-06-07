@@ -465,6 +465,27 @@ pub struct NonceEntry {
     pub chip_core: u16,
 }
 
+impl NonceEntry {
+    /// Which of the version-rolled midstates produced this nonce.
+    ///
+    /// A BM1398 work item carries up to four version-rolled midstates (AsicBoost);
+    /// the chip reports which one matched so the host can submit the share with the
+    /// matching rolled version. The index is taken from the low bits of the
+    /// chip/core selector, masked to the midstate count.
+    ///
+    /// NEEDS-HW-CONFIRM: the exact selector bits that carry the midstate number
+    /// (vs. chip and small-core ids) must be validated against a pool-accepted
+    /// version-rolled share. Until then this is the single place to correct the
+    /// mapping; everything downstream consumes the returned index.
+    pub fn midstate_index(&self, midstate_count: usize) -> usize {
+        if midstate_count <= 1 {
+            return 0;
+        }
+        let span = midstate_count.next_power_of_two();
+        (usize::from(self.chip_core) & (span - 1)).min(midstate_count - 1)
+    }
+}
+
 /// Decode one nonce FIFO entry from its metadata word and nonce word, mirroring
 /// the field extraction in stock bmminer `FUN_00034810`.
 pub fn decode_nonce_entry(meta: u32, nonce: u32) -> NonceEntry {
@@ -625,6 +646,27 @@ mod tests {
             decode_nonce_block(&block),
             decode_nonce_entry(0x0512_2A00, 0x1234_5607)
         );
+    }
+
+    #[test]
+    fn midstate_index_selects_from_low_selector_bits_within_count() {
+        let entry = |chip_core: u16| NonceEntry {
+            nonce: 0,
+            crc_error: false,
+            register_response: false,
+            work_id: 0,
+            chip_core,
+        };
+        // Low two bits choose among four midstates.
+        assert_eq!(entry(0b1000).midstate_index(4), 0);
+        assert_eq!(entry(0b1001).midstate_index(4), 1);
+        assert_eq!(entry(0b1010).midstate_index(4), 2);
+        assert_eq!(entry(0b1011).midstate_index(4), 3);
+        // A single-midstate (plain) work item always maps to index 0.
+        assert_eq!(entry(0b1111).midstate_index(1), 0);
+        // The index never exceeds the available midstate count.
+        assert!(entry(0xffff).midstate_index(4) < 4);
+        assert!(entry(0xffff).midstate_index(3) < 3);
     }
 
     fn sample_work(midstates: usize) -> WorkItem {

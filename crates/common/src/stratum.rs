@@ -155,6 +155,12 @@ pub struct StratumShareCandidate {
     pub extranonce2: String,
     pub ntime: String,
     pub nonce: String,
+    /// Rolled block version used for this share (BIP310 / Stratum version
+    /// rolling), as 8 hex characters. `None` for non-version-rolled work; when
+    /// present it is sent as the sixth `mining.submit` parameter so the pool can
+    /// reconstruct the header with the same version the chip actually hashed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -219,6 +225,14 @@ pub fn precheck_share_submit(
             SharePrecheckVerdict::RejectedInvalidField,
             "nonce must be 8 hex characters",
         );
+    }
+    if let Some(version) = &candidate.version {
+        if validate_fixed_hex(version, 8).is_err() {
+            return rejected(
+                SharePrecheckVerdict::RejectedInvalidField,
+                "rolled version must be 8 hex characters",
+            );
+        }
     }
     if policy.require_socket_open && !status.socket_open {
         return rejected(
@@ -891,7 +905,38 @@ mod tests {
             extranonce2: "00000002".to_string(),
             ntime: "5f5e1000".to_string(),
             nonce: nonce.to_string(),
+            version: None,
         }
+    }
+
+    fn live_status_with_active_job(job_id: &str) -> StratumEngineStatus {
+        let pipeline = JobPipelinePolicy::from(PoolConnectionPolicy::default());
+        let mut status = StratumEngineStatus::planned(Some(0), &pipeline);
+        status.socket_open = true;
+        status.subscribed = true;
+        status.authorized = true;
+        status.current_difficulty = Some(8192.0);
+        status.active_job = Some(job_template(job_id));
+        status
+    }
+
+    #[test]
+    fn rejects_malformed_rolled_version() {
+        let status = live_status_with_active_job("active-job");
+        let mut candidate = share_candidate("active-job", "00000001");
+        candidate.version = Some("xyz".to_string());
+        let result = precheck_share_submit(&candidate, &status);
+        assert_eq!(result.verdict, SharePrecheckVerdict::RejectedInvalidField);
+        assert!(!result.submit_allowed);
+    }
+
+    #[test]
+    fn accepts_well_formed_rolled_version() {
+        let status = live_status_with_active_job("active-job");
+        let mut candidate = share_candidate("active-job", "00000001");
+        candidate.version = Some("2000e000".to_string());
+        let result = precheck_share_submit(&candidate, &status);
+        assert_eq!(result.verdict, SharePrecheckVerdict::AcceptedForSubmit);
     }
 
     fn job_template(job_id: &str) -> StratumJobTemplate {
